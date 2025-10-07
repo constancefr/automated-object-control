@@ -5,6 +5,12 @@ Adapation from N. Fulton and A. Platzer, "Safe Reinforcement Learning via Formal
 OpenAI Gym implementation adapted from the classic control cart pole environment.
 """
 
+'''
+TODO:
+- check if initialisation is valid (proper distance between cars and to boundaries)
+- detect crash with car extremeties, not center position
+'''
+
 import logging
 import math
 import gymnasium as gym
@@ -19,7 +25,7 @@ class ACCEnv(gym.Env):
 
     def __init__(self):
         self.MAX_VALUE = 100
-        self.CAR_LENGTH = 1 # ??
+        self.CAR_LENGTH = 125/6.5 # 
         self.MIN_SEPARATION = 2*self.CAR_LENGTH
         
         # Makes the continuous fragment of the system deterministic by fixing the
@@ -61,14 +67,25 @@ class ACCEnv(gym.Env):
 
     # def is_crash(self, some_state):
     #   return some_state[0] <= 0
-    def is_crash(self, some_state):
+    def is_crash(self, ego_pos, front_pos):
         # In this coordinate system:
         # - Lower position = further right (ahead)
         # - Higher position = further left (behind)
+
+        # Calculate bumper positions
+        ego_front_bumper = ego_pos - self.CAR_LENGTH/2  # ego's front is at lower position values
+        # ego_rear_bumper = ego_pos + self.CAR_LENGTH/2   # ego's rear is at higher position values
+        
+        # front_front_bumper = front_pos - self.CAR_LENGTH/2  # front car's front
+        front_rear_bumper = front_pos + self.CAR_LENGTH/2   # front car's rear
+        
+        crash = ego_front_bumper <= front_rear_bumper
+        return crash
+
         # Crash occurs when ego car position <= front car position (ego is ahead of front)
-        ego_pos = some_state[0]
-        front_pos = self.front_state[0]
-        return ego_pos <= front_pos  # Ego is ahead of or collided with front car
+        # ego_pos = some_state[0]
+        # front_pos = self.front_state[0]
+        # return ego_pos <= front_pos + 125  # Ego is ahead of or collided with front car
 
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -150,7 +167,7 @@ class ACCEnv(gym.Env):
         
         # Get ego state
         state = self.state
-        pos, vel = state[0],state[1]
+        ego_pos, ego_vel = state[0],state[1]
 
         # Determine acceleration:
         # TODO: Update choice of acceleration based on changed action space
@@ -171,34 +188,41 @@ class ACCEnv(gym.Env):
         # vel = vel = acc*t + vel_0
         t = self.TIME_STEP
 
-        pos_0 = pos
-        vel_0 = vel
-        pos = acc*t**2/2 + vel_0*t + pos_0
-        vel = acc*t + vel_0
+        pos_0 = ego_pos
+        vel_0 = ego_vel
+        ego_pos = acc*t**2/2 + vel_0*t + pos_0
+        ego_vel = acc*t + vel_0
 
-        self.state = (pos, vel)
+        self.state = (ego_pos, ego_vel)
 
         # Distance between cars
         front_pos_new, _ = self.front_state
-        new_dist = pos - front_pos_new
-        # new_dist = front_pos_new - pos
+
+        crash = self.is_crash(ego_pos, front_pos_new)
+        truncated = (ego_pos > self.MAX_VALUE - self.CAR_LENGTH/2 or 
+                ego_pos < self.CAR_LENGTH/2 or
+                front_pos_new > self.MAX_VALUE - self.CAR_LENGTH/2 or 
+                front_pos_new < self.CAR_LENGTH/2)
+    
+        done = crash or truncated
+
+        # ego_front_bumper = ego_pos - self.CAR_LENGTH/2
+        # front_rear_bumper = front_pos_new + self.CAR_LENGTH/2
+        # actual_distance = front_rear_bumper - ego_front_bumper
+
+        # new_dist = ego_pos - front_pos_new
 
         # crash = self.is_crash(self.state)
-        crash = new_dist <= 0
-        truncated = self.state[0] > self.MAX_VALUE or front_pos_new > self.MAX_VALUE
-        done = crash or truncated
-        done = bool(done)
+        # crash = new_dist <= 0
+        # truncated = self.state[0] > self.MAX_VALUE or front_pos_new > self.MAX_VALUE
+        # done = crash or truncated
 
         if not done:
-            # Well done, you stayed alive!
+            # TODO: add small reward for maintaining good distance (not too far, not too close)
             reward = 0.1
-        # elif done and self.state[0] <= 1:
-        elif done and new_dist <= 1:
-            # TOO CLOSE
+        elif done and crash:
             reward = -200.0
-        # elif done and self.state[0] > self.MAX_VALUE - 0.5:
-        elif done and new_dist > 4: # ?? TODO find right dist bound!!
-            # Fell too far behind
+        elif done and truncated:
             reward = -50.0
         else:
             assert False, "Not sure why this should happen, and when it was previously there was a bug in the if/elif guards..."
@@ -221,8 +245,8 @@ class ACCEnv(gym.Env):
             return np.array(self.state), {'crash': self.is_crash(state)}
         
         # EGO CAR ---
-        min_ego_pos = self.CAR_LENGTH  # extra space from left boundary
-        max_ego_pos = 0.5 * self.MAX_VALUE  # in left 50% of track
+        min_ego_pos = self.CAR_LENGTH / 2
+        max_ego_pos = 0.5 * self.MAX_VALUE  # TODO: make this depend on the front car
         pos = self.MAX_VALUE - self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
         
         # We must not approach too fast (in which case braking would not stop us anymore)
@@ -235,8 +259,8 @@ class ACCEnv(gym.Env):
         self.state = (np.float32(pos), np.float32(vel))
 
         # FRONT CAR ---
-        min_front_pos = pos - 2 * self.CAR_LENGTH
-        max_front_pos = self.MAX_VALUE - 2 * self.CAR_LENGTH  # Leave space from right boundary
+        min_front_pos = pos - self.CAR_LENGTH
+        max_front_pos = self.MAX_VALUE - self.CAR_LENGTH / 2  # Leave space from right boundary
         front_pos = self.MAX_VALUE - self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
         
         front_min_velocity = 0

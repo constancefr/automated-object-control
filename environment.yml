@@ -1,0 +1,15 @@
+name: car_control_env
+channels:
+- conda-forge
+- defaults
+dependencies:
+- python=3.11
+- gymnasium
+- stable-baselines3
+- matplotlib
+- opencv
+- numpy
+- pygame
+- pip
+- pip:
+  - random2

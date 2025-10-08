@@ -1,8 +1,7 @@
 """
 Linear Adaptive Cruise Control in Relative Coordinates.
-The visualization fixes the position of the leader car.
-Adapation from N. Fulton and A. Platzer, "Safe Reinforcement Learning via Formal Methods: Toward Safe Control through Proof and Learning", AAAI 2018.
-OpenAI Gym implementation adapted from the classic control cart pole environment.
+Adapation from S. Teuber's OpenAI Gym implementation at https://github.com/samysweb/VerSAILLE/blob/kikit/technical/docker/contents/libs/acc.py.
+The leader car accelerates, breaks or idles randomly.
 """
 
 '''

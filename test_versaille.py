@@ -60,17 +60,19 @@ def run_demo_episodes(num_episodes=3):
     
     env.close()
 
-def run_with_policy(env, policy_type="cautious", max_steps=100):
+def run_with_policy(env, policy_type="cautious", max_steps=1000):
     obs, info = env.reset()
     total_reward = 0
     
     for step in range(max_steps):
-        if policy_type == "cautious":
-            action = np.random.choice([0, 1], p=[0.4, 0.6])  # 40% brake, 60% idle
-        elif policy_type == "aggressive":
-            action = np.random.choice([1, 2], p=[0.3, 0.7])  # 30% idle, 70% accelerate
-        elif policy_type == "balanced":
-            action = env.action_space.sample() # random
+        if policy_type == "brake":
+            action = 2 # brake
+        elif policy_type == "accelerate":
+            action = 0 # accelerate
+        elif policy_type == "idle":
+            action = 1
+        elif policy_type == "random":
+            action = env.action_space.sample()
         else:
             action = env.action_space.sample()
         
@@ -83,7 +85,7 @@ def run_with_policy(env, policy_type="cautious", max_steps=100):
     return total_reward
 
 def compare_policies():    
-    policies = ["cautious", "aggressive", "balanced"]
+    policies = ["brake", "accelerate", "idle", "random"]
     
     for policy in policies:
         print(f"\n--- Testing {policy} policy ---")
@@ -106,8 +108,8 @@ if __name__ == "__main__":
     import os
     os.makedirs("./videos", exist_ok=True)
     
-    print("\nRunning simple demo episodes")
-    run_demo_episodes(num_episodes=2)
+    # print("\nRunning simple demo episodes")
+    # run_demo_episodes(num_episodes=2)
     
     print("\nComparing different driving policies")
     compare_policies()

@@ -1,14 +1,12 @@
 """
 Linear Adaptive Cruise Control in Relative Coordinates.
-The visualization fixes the position of the leader car.
-Adapation from N. Fulton and A. Platzer, "Safe Reinforcement Learning via Formal Methods: Toward Safe Control through Proof and Learning", AAAI 2018.
-OpenAI Gym implementation adapted from the classic control cart pole environment.
+Adapation from S. Teuber's OpenAI Gym implementation at https://github.com/samysweb/VerSAILLE/blob/kikit/technical/docker/contents/libs/acc.py.
+The leader car accelerates, breaks or idles randomly.
 """
 
 '''
 TODO:
 - check if initialisation is valid (proper distance between cars and to boundaries)
-- detect crash with car extremeties, not center position
 '''
 
 import logging
@@ -26,7 +24,7 @@ class ACCEnv(gym.Env):
     def __init__(self):
         self.MAX_VALUE = 100
         self.CAR_LENGTH = 125/6.5 # 
-        self.MIN_SEPARATION = 2*self.CAR_LENGTH
+        self.MIN_SEPARATION = 1.5 * self.CAR_LENGTH
         
         # Makes the continuous fragment of the system deterministic by fixing the
         # amount of time that the ODE evolves.
@@ -60,59 +58,28 @@ class ACCEnv(gym.Env):
         self.invert_loss = False
 
         # FRONT CAR ---
-        # self.front_action_space = spaces.Discrete(3)
         self.front_observation_space = spaces.Box(-bound, bound)
         self.front_state = None
-
-
-    # def is_crash(self, some_state):
-    #   return some_state[0] <= 0
-    def is_crash(self, ego_pos, front_pos):
-        # In this coordinate system:
-        # - Lower position = further right (ahead)
-        # - Higher position = further left (behind)
-
-        # Calculate bumper positions
-        ego_front_bumper = ego_pos - self.CAR_LENGTH/2  # ego's front is at lower position values
-        # ego_rear_bumper = ego_pos + self.CAR_LENGTH/2   # ego's rear is at higher position values
-        
-        # front_front_bumper = front_pos - self.CAR_LENGTH/2  # front car's front
-        front_rear_bumper = front_pos + self.CAR_LENGTH/2   # front car's rear
-        
-        crash = ego_front_bumper <= front_rear_bumper
-        return crash
-
-        # Crash occurs when ego car position <= front car position (ego is ahead of front)
-        # ego_pos = some_state[0]
-        # front_pos = self.front_state[0]
-        # return ego_pos <= front_pos + 125  # Ego is ahead of or collided with front car
 
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
-    
-    # def update_front_action(self, front_pos, front_vel):
-    #     # Calc distance to window boundaries
-    #     dist_r = self.MAX_VALUE - front_pos # right
-    #     dist_l = front_pos # left
 
-    #     if dist_l <= self.MIN_SEPARATION: # need enough space for one full car in between ego & front
-    #         action_space = [0] # accelerate
-    #     elif dist_r <= self.CAR_LENGTH: # touching right extremity
-    #         action_space = [2] # break
-    #     else:
-    #         action_space = [0,1,2] # full action space
+    def is_crash(self, ego_pos, front_pos):
+        ego_front_bumper = ego_pos + self.CAR_LENGTH/2
+        front_rear_bumper = front_pos - self.CAR_LENGTH/2
         
-    #     action = random.choice(action_space)
-    #     return action
+        crash = ego_front_bumper >= front_rear_bumper
+        return crash
+    
     def update_front_action(self, front_pos, front_vel):
-        # Calc distance to window boundaries
-        dist_l = self.MAX_VALUE - front_pos # higher values -> closer to left boundary
-        dist_r = front_pos # lower values -> closer to right bound
+        # Calculate boundaries
+        dist_l = front_pos
+        dist_r = self.MAX_VALUE - front_pos
 
-        if dist_r <= self.MIN_SEPARATION: # need enough space for one full car in between ego & front
+        if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
             action_space = [0] # accelerate
-        elif dist_l <= self.CAR_LENGTH: # touching right extremity
+        elif dist_r <= self.CAR_LENGTH / 2: # can go up to contact with right wall
             action_space = [2] # break
         else:
             action_space = [0,1,2] # full action space
@@ -121,14 +88,13 @@ class ACCEnv(gym.Env):
         return action
     
     def update_front_state(self, front_pos, front_vel, front_action):
+        # TODO: select acceleration / braking amount continuously, not just max or min
         if front_action==0:
-            # Relative Position -> Acceleration decreases relative distance
-            acc = -self.A 
+            acc = self.A
         elif front_action==1:
             acc = 0
         elif front_action==2:
-            # Relative Position -> Braking increases relative distance
-            acc = self.B
+            acc = -self.B
         else:
             raise ValueError(f"Unknown action value {front_action}")
         
@@ -143,10 +109,10 @@ class ACCEnv(gym.Env):
         front_vel = acc*t + front_vel_0
 
         # enforce boundary constraints
-        front_pos = np.clip(front_pos, self.MIN_SEPARATION, self.MAX_VALUE - self.CAR_LENGTH)
+        front_pos = np.clip(front_pos, self.CAR_LENGTH/2, self.MAX_VALUE - self.CAR_LENGTH/2)
         
         # velocity constraints
-        max_vel = np.sqrt((self.MAX_VALUE - front_pos) * 2 * self.A)
+        max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
         front_vel = np.clip(front_vel, 0, max_vel)
 
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
@@ -156,13 +122,11 @@ class ACCEnv(gym.Env):
         assert self.action_space.contains(action), "%s (of type %s) invalid" % (str(action), type(action))
 
         # FRONT CAR ---
-
         front_state = self.front_state
         front_pos,front_vel = front_state[0],front_state[1]
 
         front_action = self.update_front_action(front_pos, front_vel)
         self.update_front_state(front_pos, front_vel, front_action)
-
         # -------------
         
         # Get ego state
@@ -173,13 +137,11 @@ class ACCEnv(gym.Env):
         # TODO: Update choice of acceleration based on changed action space
         acc = 0
         if action==0:
-            # Relative Position -> Acceleration decreases relative distance
-            acc = -self.A 
+            acc = self.A 
         elif action==1:
             acc = 0
         elif action==2:
-            # Relative Position -> Braking increases relative distance
-            acc = self.B
+            acc = -self.B
         else:
             raise ValueError(f"Unknown action value {action}")
 
@@ -205,17 +167,6 @@ class ACCEnv(gym.Env):
                 front_pos_new < self.CAR_LENGTH/2)
     
         done = crash or truncated
-
-        # ego_front_bumper = ego_pos - self.CAR_LENGTH/2
-        # front_rear_bumper = front_pos_new + self.CAR_LENGTH/2
-        # actual_distance = front_rear_bumper - ego_front_bumper
-
-        # new_dist = ego_pos - front_pos_new
-
-        # crash = self.is_crash(self.state)
-        # crash = new_dist <= 0
-        # truncated = self.state[0] > self.MAX_VALUE or front_pos_new > self.MAX_VALUE
-        # done = crash or truncated
 
         if not done:
             # TODO: add small reward for maintaining good distance (not too far, not too close)
@@ -245,9 +196,9 @@ class ACCEnv(gym.Env):
             return np.array(self.state), {'crash': self.is_crash(state)}
         
         # EGO CAR ---
-        min_ego_pos = self.CAR_LENGTH / 2
-        max_ego_pos = 0.5 * self.MAX_VALUE  # TODO: make this depend on the front car
-        pos = self.MAX_VALUE - self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
+        min_ego_pos = self.CAR_LENGTH / 2 # stay within frame
+        max_ego_pos = self.MAX_VALUE - self.CAR_LENGTH * 1.5 # some extra space for the front car to fit
+        pos = self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
         
         # We must not approach too fast (in which case braking would not stop us anymore)
         min_velocity = -np.sqrt(pos*2*self.B)
@@ -259,19 +210,19 @@ class ACCEnv(gym.Env):
         self.state = (np.float32(pos), np.float32(vel))
 
         # FRONT CAR ---
-        min_front_pos = pos - self.CAR_LENGTH
-        max_front_pos = self.MAX_VALUE - self.CAR_LENGTH / 2  # Leave space from right boundary
-        front_pos = self.MAX_VALUE - self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
+        min_front_pos = pos + self.CAR_LENGTH
+        max_front_pos = self.MAX_VALUE - self.CAR_LENGTH / 2 # stay within frame
+        front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
         
-        front_min_velocity = 0
-        front_max_velocity = min(np.sqrt((self.MAX_VALUE - front_pos) * 2 * self.A), 20.0)
+        front_min_velocity = 0.0
+        front_max_velocity = min(np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A)), 20.0)
         front_vel = self.np_random.uniform(low=front_min_velocity, high=front_max_velocity, size=(1,))[0]
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
         # Debug
-        actual_distance = pos - front_pos  # Positive if ego is behind front car
+        actual_distance = front_pos - pos
         print(f"Initialized: ego at {pos:.1f}, front at {front_pos:.1f}")
-        print(f"Ego is {'BEHIND' if actual_distance > 0 else 'AHEAD'} front car by {abs(actual_distance):.1f} units")
+        print(f"Ego is {'behind' if actual_distance > 0 else 'ahead of'} front car by {abs(actual_distance):.1f} units")
         
         return np.array(self.state), {'crash': False}
 
@@ -308,7 +259,10 @@ class ACCEnv(gym.Env):
         # cartwidth = 250.0
         cartheight = 30.0
         # cartheight = 60.0
-        x_scale = (screen_width-100-2*cartwidth)/self.MAX_VALUE
+        x_scale = screen_width / self.MAX_VALUE
+
+        cart_pix_width = self.CAR_LENGTH * x_scale
+        cart_pix_height = cartheight
 
         relativeDistance = cartwidth * 2
 
@@ -321,10 +275,11 @@ class ACCEnv(gym.Env):
             self.front_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/front-car.png").convert_alpha()
             original_width, original_height = self.nn_cart.get_size()
 
-            scale_factor = cartwidth / original_width
+            scale_factor = cart_pix_width / original_width
+            # scale_factor = cartwidth / original_width
             new_height = int(original_height * scale_factor)
-            self.nn_cart = pygame.transform.flip(pygame.transform.smoothscale(self.nn_cart, (cartwidth, new_height)),False,True)
-            self.front_car = pygame.transform.flip(pygame.transform.smoothscale(self.front_cart, (cartwidth, new_height)),False,True)
+            self.nn_cart = pygame.transform.flip(pygame.transform.smoothscale(self.nn_cart, (int(cart_pix_width), new_height)),False,True)
+            self.front_car = pygame.transform.flip(pygame.transform.smoothscale(self.front_cart, (int(cart_pix_width), new_height)),False,True)
 
             self.pole_positions = [x for x in range(0, screen_width + pole_spacing, pole_spacing)]
             self.cloud_positions = [(x, 300 + 50 * (i % 2)) for i, x in enumerate(range(0, screen_width + cloud_spacing, cloud_spacing))]
@@ -365,23 +320,28 @@ class ACCEnv(gym.Env):
             pygame.draw.rect(self.surf, (0, 0, 0), pygame.Rect(x, carty, pole_width, pole_height))
 
         # CARS!
-        relativeDistance, relativeVelocity = self.state
-        followerx = screen_width - 100 - relativeDistance*x_scale - cartwidth
+        ego_pos, ego__vel = self.state
         front_pos, front_vel = self.front_state
-        leaderx = screen_width - 100 - front_pos*x_scale - cartwidth
+
+        front_x = front_pos * x_scale
+        ego_x = ego_pos * x_scale
                    
-        # Add a follower cart.
-        l,r = -cartwidth, 0.0
+        # Converting centre to upper-left for blit (so image is centered)
+        half_w = cart_pix_width / 2.0
+        # Add a follower cart
+        l,r = -half_w, 0.0
+        # l,r = -cartwidth, 0.0
         t,b = cartheight, 0.0
-        l += followerx
+        l += ego_x
         b += carty*0.75
         #gfxdraw.filled_polygon(self.surf, coords, (0,0,0))
         self.surf.blit(self.nn_cart, (l,b)) # (l,b) is upper-left corner
 
         # Add leader cart
-        l,r = -cartwidth, 0.0
+        l,r = -half_w, 0.0
+        # l,r = -cartwidth, 0.0
         t,b = cartheight, 0.0
-        l += leaderx
+        l += front_x
         b += carty*0.75
         self.surf.blit(self.front_car, (l,b))
 

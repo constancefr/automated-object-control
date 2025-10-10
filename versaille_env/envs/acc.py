@@ -20,6 +20,7 @@ import pygame
 from pygame import gfxdraw
 
 class ACCEnv(gym.Env):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
     def __init__(self):
         self.MAX_VALUE = 100
@@ -84,7 +85,8 @@ class ACCEnv(gym.Env):
         else:
             action_space = [0,1,2] # full action space
         
-        action = random.choice(action_space)
+        # action = random.choice(action_space)
+        action = self.np_random.choice(action_space)
         return action
     
     def update_front_state(self, front_pos, front_vel, front_action):
@@ -157,27 +159,28 @@ class ACCEnv(gym.Env):
 
         self.state = (ego_pos, ego_vel)
 
-        # Distance between cars
+        # Assigning reward
         front_pos_new, _ = self.front_state
-
+    
         crash = self.is_crash(ego_pos, front_pos_new)
         truncated = (ego_pos > self.MAX_VALUE - self.CAR_LENGTH/2 or 
                 ego_pos < self.CAR_LENGTH/2 or
                 front_pos_new > self.MAX_VALUE - self.CAR_LENGTH/2 or 
                 front_pos_new < self.CAR_LENGTH/2)
-    
         done = crash or truncated
 
-        if not done:
-            # TODO: add small reward for maintaining good distance (not too far, not too close)
-            reward = 0.1
-        elif done and crash:
-            reward = -200.0
-        elif done and truncated:
-            reward = -50.0
+        distance = front_pos_new - ego_pos
+        optimal_distance = 2 * self.CAR_LENGTH # somewhat arbitrary
+        distance_error = abs(distance - optimal_distance)
+
+        distance_penalty = -0.01 * distance_error
+
+        if crash:
+            reward = -20.0
+        elif truncated:
+            reward = -10.0
         else:
-            assert False, "Not sure why this should happen, and when it was previously there was a bug in the if/elif guards..."
-            reward = 0.0
+            reward = 0.1 + distance_penalty
 
         if self.invert_loss:
             reward *= -1.0
@@ -220,9 +223,9 @@ class ACCEnv(gym.Env):
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
         # Debug
-        actual_distance = front_pos - pos
-        print(f"Initialized: ego at {pos:.1f}, front at {front_pos:.1f}")
-        print(f"Ego is {'behind' if actual_distance > 0 else 'ahead of'} front car by {abs(actual_distance):.1f} units")
+        # actual_distance = front_pos - pos
+        # print(f"Initialized: ego at {pos:.1f}, front at {front_pos:.1f}")
+        # print(f"Ego is {'behind' if actual_distance > 0 else 'ahead of'} front car by {abs(actual_distance):.1f} units")
         
         return np.array(self.state), {'crash': False}
 

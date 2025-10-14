@@ -85,6 +85,7 @@ def run_with_policy(env, policy_type="cautious", max_steps=1000):
     return total_reward
 
 def compare_policies():    
+    # policies = ["brake"]
     policies = ["brake", "accelerate", "idle", "random"]
     
     for policy in policies:

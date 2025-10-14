@@ -18,6 +18,7 @@ import numpy as np
 import random
 import pygame
 from pygame import gfxdraw
+import os
 
 class ACCEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
@@ -74,29 +75,77 @@ class ACCEnv(gym.Env):
         return crash
     
     def update_front_action(self, front_pos, front_vel):
-        # Calculate boundaries
+        '''
+        Computes next action for the front car.
+        Includes stochastic behaviour (emergency braking, gradual acceleration, inertia in behaviour changes).
+        '''
+        if not hasattr(self, "front_behaviour"):
+            self.front_behaviour = "cruise"
+            self.front_timer = 0
+
+        # change behaviour every 20-40 steps
+        self.front_timer += 1
         dist_l = front_pos
         dist_r = self.MAX_VALUE - front_pos
-
-        if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
-            action_space = [0] # accelerate
-        elif dist_r <= self.CAR_LENGTH / 2: # can go up to contact with right wall
-            action_space = [2] # break
-        else:
-            action_space = [0,1,2] # full action space
+        if self.front_timer > self.np_random.integers(20, 40):
+            if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
+                action_space = [0] # accelerate
+            elif dist_r <= self.CAR_LENGTH: # can go up to contact with right wall
+                action_space = [2] # break
+            else:
+                action_space = [0,1,2] # full action space
+            self.front_behaviour = self.np_random.choice(
+                ["cruise", "accelerate", "brake", "emergency_brake"],
+                p=[0.4, 0.3, 0.2, 0.1]
+            )
+            self.front_timer = 0
         
-        # action = random.choice(action_space)
-        action = self.np_random.choice(action_space)
+        # Enforce safety near boundaries (avoid touching?)
+        # if front_pos >= self.MAX_VALUE - 2 * self.CAR_LENGTH: # 2 * self.CAR_LENGTH??
+        #     self.front_behaviour = "brake"
+        # elif front_pos <= 2 * self.CAR_LENGTH: # 2 * self.CAR_LENGTH??
+        #     self.front_behaviour = "accelerate"
+        
+        if self.front_behaviour == "accelerate":
+            action = 0
+        elif self.front_behaviour == "brake":
+            action = 2
+        elif self.front_behaviour == "emergency_brake":
+            action = 2
+        else: # cruise
+            action = 1
+        
         return action
+
+        # # Calculate boundaries
+        # dist_l = front_pos
+        # dist_r = self.MAX_VALUE - front_pos
+
+        # if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
+        #     action_space = [0] # accelerate
+        # elif dist_r <= self.CAR_LENGTH / 2: # can go up to contact with right wall
+        #     action_space = [2] # break
+        # else:
+        #     action_space = [0,1,2] # full action space
+        
+        # # action = random.choice(action_space)
+        # action = self.np_random.choice(action_space)
+        # return action
     
     def update_front_state(self, front_pos, front_vel, front_action):
-        # TODO: select acceleration / braking amount continuously, not just max or min
+        '''
+        Update front car kinematics with special handling for emergency braking.
+        '''
         if front_action==0:
-            acc = self.A
+            acc = self.A * self.np_random.uniform(0.1, 1.0) # variable acceleration
         elif front_action==1:
             acc = 0
         elif front_action==2:
-            acc = -self.B
+            if getattr(self, "front_behaviour", None) == "emergency_brake":
+                acc = -self.B # strongest deceleration
+            else:
+                acc = -self.B
+                # acc = -self.B * self.np_random.uniform(0.1, 0.9)
         else:
             raise ValueError(f"Unknown action value {front_action}")
         
@@ -104,7 +153,6 @@ class ACCEnv(gym.Env):
         # pos = acc*t^2/2 + vel_0*t + pos_0
         # vel = vel = acc*t + vel_0
         t = self.TIME_STEP
-
         front_pos_0 = front_pos
         front_vel_0 = front_vel
         front_pos = acc*t**2/2 + front_vel_0*t + front_pos_0
@@ -112,10 +160,10 @@ class ACCEnv(gym.Env):
 
         # enforce boundary constraints
         front_pos = np.clip(front_pos, self.CAR_LENGTH/2, self.MAX_VALUE - self.CAR_LENGTH/2)
-        
         # velocity constraints
         max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
         front_vel = np.clip(front_vel, 0, max_vel)
+        print(f"Front car velocity: {front_vel}")
 
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
@@ -156,6 +204,7 @@ class ACCEnv(gym.Env):
         vel_0 = ego_vel
         ego_pos = acc*t**2/2 + vel_0*t + pos_0
         ego_vel = acc*t + vel_0
+        ego_vel = np.clip(ego_vel, 0, None)
 
         self.state = (ego_pos, ego_vel)
 
@@ -213,8 +262,8 @@ class ACCEnv(gym.Env):
         self.state = (np.float32(pos), np.float32(vel))
 
         # FRONT CAR ---
-        min_front_pos = pos + self.CAR_LENGTH
-        max_front_pos = self.MAX_VALUE - self.CAR_LENGTH / 2 # stay within frame
+        min_front_pos = pos + self.CAR_LENGTH # reset within boundary
+        max_front_pos = self.MAX_VALUE - self.CAR_LENGTH / 2
         front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
         
         front_min_velocity = 0.0
@@ -230,6 +279,8 @@ class ACCEnv(gym.Env):
         return np.array(self.state), {'crash': False}
 
     def render(self, mode='rgb_array', close=False):
+        os.environ["SDL_VIDEODRIVER"] = "dummy" # required when running on remote server without GUI
+        
         # This determines how our videos are rendered
         assert mode==self.render_mode
         if close:
@@ -259,7 +310,9 @@ class ACCEnv(gym.Env):
 
         carty = 40 # BOTTOM OF CART
         cartwidth = 125.0
+        cartwidth = 62.5
         # cartwidth = 250.0
+        cartheight = 30.0
         cartheight = 30.0
         # cartheight = 60.0
         x_scale = screen_width / self.MAX_VALUE

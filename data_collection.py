@@ -19,6 +19,7 @@ def collect_data(
     msg="collecting",
 ):
     """
+    TODO: change this description!!
     Collect rollouts from a trained model into a JSONL dataset.
 
     Each line of the JSONL file contains:
@@ -39,23 +40,28 @@ def collect_data(
 
     total_collected = 0
     episode_id = 0
+
     with open(jsonl_path, "w") as f:
         with trange(total_samples, desc="Collecting data") as pbar:
             while total_collected < total_samples:
                 obs, info = env.reset()
                 done = False
-                crashed = False
+                # crashed = False
                 t = 0
 
+                # Get initial front state from info
+                front_state = info[0].get('front_state', np.zeros(2))
+                front_action = info[0].get('front_action', 1)
+
                 # Handle VecNormalize to get unnormalized obs for saving
-                if isinstance(env, VecNormalize):
-                    raw_obs = env.get_original_obs()
-                    if isinstance(raw_obs, np.ndarray):
-                        obs_save = raw_obs.copy()
-                    else:
-                        obs_save = np.array(raw_obs)
-                else:
-                    obs_save = obs.copy() if isinstance(obs, np.ndarray) else np.array(obs)
+                # if isinstance(env, VecNormalize):
+                #     raw_obs = env.get_original_obs()
+                #     if isinstance(raw_obs, np.ndarray):
+                #         obs_save = raw_obs.copy()
+                #     else:
+                #         obs_save = np.array(raw_obs)
+                # else:
+                #     obs_save = obs.copy() if isinstance(obs, np.ndarray) else np.array(obs)
 
                 if record_video and episode_id % video_every == 0:
                     video_path = os.path.join(video_folder, f"episode_{episode_id}.mp4")
@@ -68,20 +74,36 @@ def collect_data(
                     video = None
 
                 while not done and total_collected < total_samples:
+                    # Get unnormalized obs for saving
+                    if hasattr(env, 'get_original_obs'):
+                        raw_obs = env.get_original_obs()
+                        obs_save = raw_obs[0].copy() if isinstance(raw_obs, np.ndarray) else np.array(raw_obs)
+                    else:
+                        obs_save = obs[0].copy() if isinstance(obs, np.ndarray) else np.array(obs)
+
+
                     # Predict action
-                    action, _ = model.predict(obs, deterministic=True)
+                    action, _ = model.predict(obs, deterministic=False)
                     obs, reward, terminated, truncated, info = env.step(action)
-                    done = terminated or truncated
-                    crashed = info.get("crash", False)
+                    done = terminated[0] or truncated[0]
+
+                    # Front car info
+                    front_state = info[0].get('front_state', front_state)
+                    front_action = info[0].get('front_action', front_action)
+                    crashed = info[0].get("crash", False)
 
                     record = {
                         "episode_id": episode_id,
-                        "t": t,
-                        "obs": obs.tolist() if hasattr(obs, "tolist") else obs,
-                        "action": int(action),
+                        "timestep": t,
+                        "ego_state": obs_save.tolist(), # [pos, vel]
+                        "ego_action": int(action[0]),
+                        "front_state": front_state.tolist() if hasattr(front_state, 'tolist') else front_state,
+                        "front_action": int(front_action),
                         "reward": float(reward),
-                        "done": bool(done),
-                        "collision": bool(crashed)
+                        "terminated": bool(terminated[0]),
+                        "truncated": bool(truncated[0]),
+                        "collision": bool(crashed),
+                        "done": bool(done)
                     }
                     f.write(json.dumps(record) + "\n")
 
@@ -113,22 +135,26 @@ def collect_data(
 
     print(f"Collected {total_collected} samples across {episode_id} episodes.")
 
-# Load environment & trained model
-env = DummyVecEnv([make_env])
-env = VecNormalize.load("results/vecnormalize_stats.pkl", env)
-env.training = False
-env.norm_reward = False
+def main():
+    # Load environment & trained model
+    env = DummyVecEnv([make_env])
+    env = VecNormalize.load("results/vecnormalize_stats.pkl", env)
+    env.training = False
+    env.norm_reward = False
 
-model = DQN.load("results/carcontrol-dqn_final", env=env)
+    model = DQN.load("results/carcontrol-dqn_final", env=env)
 
-# Collect dataset
-collect_data(
-    env,
-    model,
-    jsonl_path="./results/dataset.jsonl",
-    total_samples=20_000,
-    record_video=False,       # turn off if running on cluster?
-    video_folder="./results/videos",
-    video_every=10,
-    msg="data collection"
-)
+    # Collect dataset
+    collect_data(
+        env,
+        model,
+        jsonl_path="./results/dataset.jsonl",
+        total_samples=20_000,
+        record_video=False,       # turn off if running on cluster?
+        video_folder="./results/videos",
+        video_every=10,
+        msg="data collection"
+    )
+
+if __name__ == "__main__":
+    main()

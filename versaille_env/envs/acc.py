@@ -23,7 +23,10 @@ import os
 class ACCEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
-    def __init__(self):
+    def __init__(self, render_mode=None):
+        super().__init__()
+        self.render_mode = render_mode
+
         self.max_steps = 1000
         self.current_step = 0
 
@@ -66,6 +69,7 @@ class ACCEnv(gym.Env):
         # FRONT CAR ---
         self.front_observation_space = spaces.Box(-bound, bound)
         self.front_state = None
+        self.last_front_action = 1 # idle default
 
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -78,25 +82,25 @@ class ACCEnv(gym.Env):
         crash = ego_front_bumper >= front_rear_bumper
         return crash
 
-    def is_leaving_frame(self, ego_pos, front_pos, screen_width=2000):
-        '''
-        Adapted for camera fixed on front car - checks if ego too far behind/ahead.
-        '''
-        camera_center_world = ego_pos
-        # camera_center_world = front_pos
-        world_view_width = 100.0  # same as in render!!
+    # def is_leaving_frame(self, ego_pos, front_pos, screen_width=2000):
+    #     '''
+    #     Adapted for camera fixed on front car - checks if ego too far behind/ahead.
+    #     '''
+    #     camera_center_world = ego_pos
+    #     # camera_center_world = front_pos
+    #     world_view_width = 100.0  # same as in render!!
         
-        world_left = camera_center_world - world_view_width / 2
-        world_right = camera_center_world + world_view_width / 2
+    #     world_left = camera_center_world - world_view_width / 2
+    #     world_right = camera_center_world + world_view_width / 2
         
-        front_left = front_pos - self.REL_CAR_LENGTH / 2
-        # ego_left = ego_pos - self.REL_CAR_LENGTH / 2
-        front_right = front_pos + self.REL_CAR_LENGTH / 2
-        # ego_right = ego_pos + self.REL_CAR_LENGTH / 2
+    #     front_left = front_pos - self.REL_CAR_LENGTH / 2
+    #     # ego_left = ego_pos - self.REL_CAR_LENGTH / 2
+    #     front_right = front_pos + self.REL_CAR_LENGTH / 2
+    #     # ego_right = ego_pos + self.REL_CAR_LENGTH / 2
         
-        is_leaving = front_left < world_left or front_right > world_right
-        # is_leaving = ego_left < world_left or ego_right > world_right
-        return is_leaving
+    #     is_leaving = front_left < world_left or front_right > world_right
+    #     # is_leaving = ego_left < world_left or ego_right > world_right
+    #     return is_leaving
     
     def update_front_action(self, front_pos, front_vel):
         '''
@@ -132,7 +136,8 @@ class ACCEnv(gym.Env):
             action = 2
         else: # cruise
             action = 1
-        
+
+        self.last_front_action = action
         return action
     
     def update_front_state(self, front_pos, front_vel, front_action):
@@ -164,7 +169,6 @@ class ACCEnv(gym.Env):
         # velocity constraints
         max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
         front_vel_new = np.clip(front_vel_new, 0, max_vel)
-        print(f"New front vel: {front_vel_new}")
 
         self.front_state = (np.float32(front_pos_new), np.float32(front_vel_new))
 
@@ -184,11 +188,17 @@ class ACCEnv(gym.Env):
         
         # EGO CAR -----
         ego_pos, ego_vel = self.state
+        if isinstance(action, (list, tuple, np.ndarray)): # accept scalar or array-like actions
+            try:
+                action = int(np.asarray(action).reshape(-1)[0]) # take first elem if vectorised
+            except Exception:
+                action = int(action[0])
+
         acc = 0
         if action==0:
             acc = self.A 
         elif action==1:
-            acc = 0
+            acc = 0.0
         elif action==2:
             acc = -self.B
         else:
@@ -206,33 +216,40 @@ class ACCEnv(gym.Env):
 
         # Assigning reward    
         crash = self.is_crash(ego_pos, front_pos_new)
-        leaving_frame = self.is_leaving_frame(ego_pos, front_pos_new)
+        # leaving_frame = self.is_leaving_frame(ego_pos, front_pos_new)
         
         terminated = crash
         truncated = self.current_step >= self.max_steps
 
-        # distance = front_pos_new - ego_pos
-        # optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
-        # distance_error = abs(distance - optimal_distance)
-        # distance_penalty = -0.01 * distance_error # keep???
+        distance = front_pos_new - ego_pos_new
+        optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
+        distance_error = abs(distance - optimal_distance)
+        distance_penalty = -0.05 * distance_error
 
         if crash:
-            reward = -20.0
-        elif leaving_frame:
-            reward = -10.0
+            reward = -50.0
+        # elif leaving_frame:
+        #     reward = -10.0
         else:
-            reward = 1
-            # reward = 0.1 + distance_penalty
+            reward = 0.1 + distance_penalty
 
         if self.invert_loss:
             reward *= -1.0
 
-        return np.array(self.state,dtype=np.float32), reward, terminated, truncated, {'crash': crash}
+        info = {
+            'crash': crash,
+            'front_state': getattr(self, 'front_state'),
+            'front_action': getattr(self, 'last_front_action', 0)
+        }
+
+        return np.array(self.state,dtype=np.float32), reward, terminated, truncated, info
     
     def reset(self, seed=None, options=None):
         # If you want to change the state initialization, this is the place to go...
         if seed is not None:
             self._seed(seed=seed)
+
+        self.current_step = 0
             
         if options is not None and "new_state" in options:
             state = options["new_state"]
@@ -264,7 +281,13 @@ class ACCEnv(gym.Env):
         front_vel = self.np_random.uniform(low=front_min_velocity, high=front_max_velocity, size=(1,))[0]
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
-        return np.array(self.state), {'crash': False}
+        info = {
+            'crash': False,
+            'front_state': self.front_state,
+            'front_action': 1 # default idle
+        }
+
+        return np.array(self.state), info
 
     def render(self, mode='rgb_array', close=False):
         os.environ["SDL_VIDEODRIVER"] = "dummy" # required when running on remote server without GUI
@@ -323,8 +346,11 @@ class ACCEnv(gym.Env):
         cart_pix_height = cartheight
 
         if self.viewer is None:
+            # pygame.init()
+            # self.viewer = pygame.display.set_mode((screen_width, screen_height))
             pygame.init()
-            self.viewer = pygame.display.set_mode((screen_width, screen_height))
+            pygame.display.set_mode((1,1))
+            self.viewer = True  # dummy flag, no window
 
             self.nn_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/nn-car.png").convert_alpha()
             self.front_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/front-car.png").convert_alpha()
@@ -405,16 +431,164 @@ class ACCEnv(gym.Env):
                 pygame.Rect(x, 0, stripe_width, stripe_height)
             )
         
-        self.surf = pygame.transform.flip(self.surf, False, True)
-        self.viewer.blit(self.surf, (0, 0))
+        # self.surf = pygame.transform.flip(self.surf, False, True)
+        # self.viewer.blit(self.surf, (0, 0))
 
-        return np.transpose(np.array(pygame.surfarray.pixels3d(self.viewer)), axes=(1, 0, 2))
+        # return np.transpose(np.array(pygame.surfarray.pixels3d(self.viewer)), axes=(1, 0, 2))
+        rgb_surface = pygame.transform.flip(self.surf, False, True)
+        frame = pygame.surfarray.array3d(rgb_surface)
+        frame = np.transpose(frame, (1, 0, 2))
+        return frame
 
     def close(self):
         if self.viewer is not None:    
             pygame.display.quit()
             pygame.quit()
             self.viewer = None
+
+'''
+    def render(self, mode='rgb_array', close=False):
+        # This determines how our videos are rendered
+        assert mode==self.render_mode
+        if close:
+            if self.viewer is not None:    
+                pygame.display.quit()
+                pygame.quit()
+                self.isopen = False
+                self.viewer = None
+            return
+
+        screen_width = 2000
+        screen_height = 400
+
+        ego_pos, ego_vel = self.state
+        front_pos, front_vel = self.front_state
+
+        camera_centre_world = ego_pos
+        world_view_width = 100.0
+
+        # Convert world coords to screen coords
+        def world_to_screen(world_x):
+            relative_to_camera = world_x - camera_centre_world
+            screen_centre = screen_width * 0.25
+            return screen_centre + (relative_to_camera / world_view_width) * screen_width
+
+        # Initialize pygame if needed
+        if self.viewer is None:
+            # Use headless mode for servers
+            if self.render_mode == "rgb_array":
+                os.environ["SDL_VIDEODRIVER"] = "dummy"
+            
+            pygame.init()
+            # Create a minimal display surface
+            pygame.display.set_mode((1, 1), pygame.HIDDEN)
+            self.surf = pygame.Surface((screen_width, screen_height))
+            
+            # Load and scale car images (with error handling)
+            try:
+                self.nn_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/nn-car.png").convert_alpha()
+                self.front_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/front-car.png").convert_alpha()
+                
+                x_scale = screen_width / world_view_width
+                cart_pix_width = self.REL_CAR_LENGTH * x_scale
+                
+                original_width, original_height = self.nn_cart.get_size()
+                scale_factor = cart_pix_width / original_width
+                new_height = int(original_height * scale_factor)
+                
+                self.nn_cart = pygame.transform.flip(
+                    pygame.transform.smoothscale(self.nn_cart, (int(cart_pix_width), new_height)), False, True)
+                self.front_car = pygame.transform.flip(
+                    pygame.transform.smoothscale(self.front_cart, (int(cart_pix_width), new_height)), False, True)
+            except Exception as e:
+                print(f"Warning: Could not load car images: {e}")
+                # Create placeholder rectangles if images fail to load
+                self.nn_cart = pygame.Surface((50, 20))
+                self.nn_cart.fill((255, 0, 0))  # Red for ego car
+                self.front_car = pygame.Surface((50, 20))
+                self.front_car.fill((0, 0, 255))  # Blue for front car
+
+            # Initialize scrolling elements
+            self.pole_positions = [x for x in range(0, screen_width + 200, 200)]
+            self.cloud_positions = [(x, 300 + 50 * (i % 2)) for i, x in enumerate(range(0, screen_width + 300, 300))]
+            self.hill_positions = [x for x in range(0, screen_width + 600, 600)]
+            self.stripe_positions = [x for x in range(0, screen_width + 80, 80)]
+
+        # Update scrolling elements
+        scroll_base = ego_vel * 2.0
+        pole_speed = scroll_base
+        cloud_speed = scroll_base * 0.1
+        hill_speed = scroll_base * 0.2
+
+        self.pole_positions = [
+            x - pole_speed if x - pole_speed > -10 else screen_width
+            for x in self.pole_positions
+        ]
+        self.cloud_positions = [
+            ((x - cloud_speed) if (x - cloud_speed) > -90 else screen_width, y)
+            for (x, y) in self.cloud_positions
+        ]
+        self.hill_positions = [
+            (x - hill_speed) if (x - hill_speed) > -400 else screen_width
+            for x in self.hill_positions
+        ]
+        self.stripe_positions = [
+            x - pole_speed if x - pole_speed > -40 else screen_width
+            for x in self.stripe_positions
+        ]
+
+        # Clear surface
+        self.surf.fill((135, 206, 235))  # Sky blue
+
+        # Draw background elements
+        for (x, y) in self.cloud_positions:
+            pygame.draw.ellipse(self.surf, (255, 255, 255), pygame.Rect(x, y, 80, 40))
+
+        for x in self.hill_positions:
+            pygame.draw.ellipse(self.surf, (0, 128, 0), pygame.Rect(x, 10, 400, 120))
+
+        # Draw road
+        carty = 40
+        pygame.draw.rect(self.surf, (34, 139, 34), pygame.Rect(0, carty, screen_width, carty))
+        pygame.draw.rect(self.surf, (192, 192, 192), pygame.Rect(0, 0, screen_width, carty))
+
+        # Draw poles
+        for x in self.pole_positions:
+            pygame.draw.rect(self.surf, (0, 0, 0), pygame.Rect(x, carty, 10, 60))
+
+        # Draw cars
+        ego_x = world_to_screen(ego_pos)
+        front_x = world_to_screen(front_pos)
+        
+        half_w = self.nn_cart.get_width() / 2.0
+        
+        # Draw ego car
+        ego_rect = self.nn_cart.get_rect(center=(ego_x, carty * 0.25 + self.nn_cart.get_height() / 2))
+        self.surf.blit(self.nn_cart, ego_rect)
+        
+        # Draw front car
+        front_rect = self.front_car.get_rect(center=(front_x, carty * 0.25 + self.front_car.get_height() / 2))
+        self.surf.blit(self.front_car, front_rect)
+
+        # Draw road stripes
+        stripe_color = (228, 228, 228)
+        for x in self.stripe_positions:
+            pygame.draw.rect(self.surf, stripe_color, pygame.Rect(x, 0, 40, 5))
+
+        # Convert to numpy array
+        rgb_surface = pygame.transform.flip(self.surf, False, True)
+        frame = pygame.surfarray.array3d(rgb_surface)
+        frame = np.transpose(frame, (1, 0, 2))
+        
+        return frame
+
+    def close(self):
+        if self.viewer is not None:    
+            pygame.display.quit()
+            pygame.quit()
+            self.viewer = None
+
+'''
 
 
 gym.register(

@@ -77,6 +77,7 @@ def run_with_policy(env, policy_type="cautious", max_steps=1000):
             action = env.action_space.sample()
         
         obs, reward, terminated, truncated, info = env.step(action)
+        # print(f"STEP OUTPUT: {obs, reward, terminated, truncated, info}")
         total_reward += reward
         
         if terminated or truncated:
@@ -84,9 +85,8 @@ def run_with_policy(env, policy_type="cautious", max_steps=1000):
     
     return total_reward
 
-def compare_policies():    
-    policies = ["brake"]
-    # policies = ["brake", "accelerate", "idle", "random"]
+def compare_policies():
+    policies = ["brake", "accelerate", "idle", "random"]
     
     for policy in policies:
         print(f"\n--- Testing {policy} policy ---")

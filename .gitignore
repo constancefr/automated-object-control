@@ -2,6 +2,12 @@ videos/
 training_videos/
 tensorboard/
 *.mp4
+acc_dqn_*.zip
+acc_dqn_checkpoints/
+*.err
+*.out
+results/
+*.png
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python

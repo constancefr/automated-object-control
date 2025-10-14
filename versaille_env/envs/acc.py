@@ -24,9 +24,14 @@ class ACCEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
     def __init__(self):
+        self.max_steps = 1000
+        self.current_step = 0
+
         self.MAX_VALUE = 100
-        self.CAR_LENGTH = 125/6.5 # 
-        self.MIN_SEPARATION = 1.5 * self.CAR_LENGTH
+        self.CAR_LENGTH = 62.5
+        self.CAR_HEIGHT = 15.0
+        self.REL_CAR_LENGTH = self.CAR_LENGTH/6.5
+        self.MIN_SEPARATION = 1.5 * self.REL_CAR_LENGTH
         
         # Makes the continuous fragment of the system deterministic by fixing the
         # amount of time that the ODE evolves.
@@ -68,11 +73,25 @@ class ACCEnv(gym.Env):
         return [seed]
 
     def is_crash(self, ego_pos, front_pos):
-        ego_front_bumper = ego_pos + self.CAR_LENGTH/2
-        front_rear_bumper = front_pos - self.CAR_LENGTH/2
+        ego_front_bumper = ego_pos + self.REL_CAR_LENGTH/2
+        front_rear_bumper = front_pos - self.REL_CAR_LENGTH/2
         
         crash = ego_front_bumper >= front_rear_bumper
         return crash
+
+    def is_leaving_frame(self, ego_pos, front_pos, screen_width=2000):
+        '''
+        Adapted for camera fixed on front car.
+        '''
+        x_scale = screen_width / self.MAX_VALUE
+        front_x_centre = screen_width * 0.75
+
+        world_left = front_pos - front_x_centre / x_scale
+        world_right = front_pos + (screen_width - front_x_centre) / x_scale
+        
+        is_leaving = (ego_pos - self.REL_CAR_LENGTH/2) < world_left or (ego_pos + self.REL_CAR_LENGTH/2) > world_right
+
+        return is_leaving
     
     def update_front_action(self, front_pos, front_vel):
         '''
@@ -90,20 +109,20 @@ class ACCEnv(gym.Env):
         if self.front_timer > self.np_random.integers(20, 40):
             if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
                 action_space = [0] # accelerate
-            elif dist_r <= self.CAR_LENGTH: # can go up to contact with right wall
+            elif dist_r <= self.REL_CAR_LENGTH: # can go up to contact with right wall
                 action_space = [2] # break
             else:
                 action_space = [0,1,2] # full action space
             self.front_behaviour = self.np_random.choice(
                 ["cruise", "accelerate", "brake", "emergency_brake"],
-                p=[0.4, 0.3, 0.2, 0.1]
+                p=[0.5, 0.3, 0.1, 0.1]
             )
             self.front_timer = 0
         
         # Enforce safety near boundaries (avoid touching?)
-        # if front_pos >= self.MAX_VALUE - 2 * self.CAR_LENGTH: # 2 * self.CAR_LENGTH??
+        # if front_pos >= self.MAX_VALUE - 2 * self.REL_CAR_LENGTH: # 2 * self.REL_CAR_LENGTH??
         #     self.front_behaviour = "brake"
-        # elif front_pos <= 2 * self.CAR_LENGTH: # 2 * self.CAR_LENGTH??
+        # elif front_pos <= 2 * self.REL_CAR_LENGTH: # 2 * self.REL_CAR_LENGTH??
         #     self.front_behaviour = "accelerate"
         
         if self.front_behaviour == "accelerate":
@@ -123,7 +142,7 @@ class ACCEnv(gym.Env):
 
         # if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
         #     action_space = [0] # accelerate
-        # elif dist_r <= self.CAR_LENGTH / 2: # can go up to contact with right wall
+        # elif dist_r <= self.REL_CAR_LENGTH / 2: # can go up to contact with right wall
         #     action_space = [2] # break
         # else:
         #     action_space = [0,1,2] # full action space
@@ -159,16 +178,20 @@ class ACCEnv(gym.Env):
         front_vel = acc*t + front_vel_0
 
         # enforce boundary constraints
-        front_pos = np.clip(front_pos, self.CAR_LENGTH/2, self.MAX_VALUE - self.CAR_LENGTH/2)
+        front_pos = np.clip(front_pos, self.REL_CAR_LENGTH/2, self.MAX_VALUE - self.REL_CAR_LENGTH/2)
         # velocity constraints
         max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
         front_vel = np.clip(front_vel, 0, max_vel)
-        print(f"Front car velocity: {front_vel}")
+        # print(f"Front car velocity: {front_vel}")
 
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
     def step(self, action):
-        # What happens when the model takes a step
+        '''
+        TODO: double check terminated vs truncated implementation!
+        TODO: remove distance penalty now that we have out of frame neg reward?
+        '''
+        self.current_step += 1
         assert self.action_space.contains(action), "%s (of type %s) invalid" % (str(action), type(action))
 
         # FRONT CAR ---
@@ -212,21 +235,24 @@ class ACCEnv(gym.Env):
         front_pos_new, _ = self.front_state
     
         crash = self.is_crash(ego_pos, front_pos_new)
-        truncated = (ego_pos > self.MAX_VALUE - self.CAR_LENGTH/2 or 
-                ego_pos < self.CAR_LENGTH/2 or
-                front_pos_new > self.MAX_VALUE - self.CAR_LENGTH/2 or 
-                front_pos_new < self.CAR_LENGTH/2)
-        done = crash or truncated
+        leaving_frame = self.is_leaving_frame(ego_pos, front_pos_new)
+        # truncated = (ego_pos > self.MAX_VALUE - self.REL_CAR_LENGTH/2 or 
+        #         ego_pos < self.REL_CAR_LENGTH/2 or
+        #         front_pos_new > self.MAX_VALUE - self.REL_CAR_LENGTH/2 or 
+        #         front_pos_new < self.REL_CAR_LENGTH/2)
+        # done = crash or truncated
+        terminated = crash or leaving_frame # TODO: remove leaving_frame!!!
+        truncated = self.current_step >= self.max_steps
 
         distance = front_pos_new - ego_pos
-        optimal_distance = 2 * self.CAR_LENGTH # somewhat arbitrary
+        optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
         distance_error = abs(distance - optimal_distance)
 
-        distance_penalty = -0.01 * distance_error
+        distance_penalty = -0.01 * distance_error # keep???
 
         if crash:
             reward = -20.0
-        elif truncated:
+        elif leaving_frame:
             reward = -10.0
         else:
             reward = 0.1 + distance_penalty
@@ -234,7 +260,7 @@ class ACCEnv(gym.Env):
         if self.invert_loss:
             reward *= -1.0
 
-        return np.array(self.state,dtype=np.float32), reward, done, truncated, {'crash': crash}
+        return np.array(self.state,dtype=np.float32), reward, terminated, truncated, {'crash': crash}
     
     def reset(self, seed=None, options=None):
         # If you want to change the state initialization, this is the place to go...
@@ -248,8 +274,8 @@ class ACCEnv(gym.Env):
             return np.array(self.state), {'crash': self.is_crash(state)}
         
         # EGO CAR ---
-        min_ego_pos = self.CAR_LENGTH / 2 # stay within frame
-        max_ego_pos = self.MAX_VALUE - self.CAR_LENGTH * 1.5 # some extra space for the front car to fit
+        min_ego_pos = self.REL_CAR_LENGTH / 2 # stay within frame
+        max_ego_pos = self.MAX_VALUE - self.REL_CAR_LENGTH * 1.5 # some extra space for the front car to fit
         pos = self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
         
         # We must not approach too fast (in which case braking would not stop us anymore)
@@ -262,8 +288,8 @@ class ACCEnv(gym.Env):
         self.state = (np.float32(pos), np.float32(vel))
 
         # FRONT CAR ---
-        min_front_pos = pos + self.CAR_LENGTH # reset within boundary
-        max_front_pos = self.MAX_VALUE - self.CAR_LENGTH / 2
+        min_front_pos = pos + self.REL_CAR_LENGTH # reset within boundary
+        max_front_pos = self.MAX_VALUE - self.REL_CAR_LENGTH / 2
         front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
         
         front_min_velocity = 0.0
@@ -290,18 +316,26 @@ class ACCEnv(gym.Env):
                 self.isopen = False
                 self.viewer = None
 
-        screen_width = 1000
+        screen_width = 2000
         screen_height = 400
 
-        pole_speed = 10  # pixels per frame
+        ego_pos, ego_vel = self.state
+        front_pos, front_vel = self.front_state
+
+        scroll_base = front_vel * 2.0
+
+        pole_speed = scroll_base  # pixels per frame
+        # pole_speed = 10  # pixels per frame
         pole_spacing = 200  # distance between poles in pixels
         pole_width = 10
         pole_height = 60
         
-        cloud_speed = 1  # slower for parallax
+        cloud_speed = scroll_base * 0.1  # slower for parallax
+        # cloud_speed = 1  # slower for parallax
         cloud_spacing = 300
 
-        hill_speed = 2  # Very slow for distant background
+        # hill_speed = 2  # Very slow for distant background
+        hill_speed = scroll_base * 0.2  # Very slow for distant background
         hill_spacing = 600  # Distance between hills
 
         stripe_width = 40
@@ -309,15 +343,11 @@ class ACCEnv(gym.Env):
         stripe_spacing = 80
 
         carty = 40 # BOTTOM OF CART
-        cartwidth = 125.0
-        cartwidth = 62.5
-        # cartwidth = 250.0
-        cartheight = 30.0
-        cartheight = 30.0
-        # cartheight = 60.0
+        cartwidth = self.CAR_LENGTH
+        cartheight = self.CAR_HEIGHT
         x_scale = screen_width / self.MAX_VALUE
 
-        cart_pix_width = self.CAR_LENGTH * x_scale
+        cart_pix_width = self.REL_CAR_LENGTH * x_scale
         cart_pix_height = cartheight
 
         relativeDistance = cartwidth * 2
@@ -376,11 +406,11 @@ class ACCEnv(gym.Env):
             pygame.draw.rect(self.surf, (0, 0, 0), pygame.Rect(x, carty, pole_width, pole_height))
 
         # CARS!
-        ego_pos, ego__vel = self.state
-        front_pos, front_vel = self.front_state
-
-        front_x = front_pos * x_scale
-        ego_x = ego_pos * x_scale
+        front_x_centre = screen_width * 0.75
+        ego_x = front_x_centre + (ego_pos - front_pos) * x_scale
+        front_x = front_x_centre
+        # front_x = front_pos * x_scale
+        # ego_x = ego_pos * x_scale
                    
         # Converting centre to upper-left for blit (so image is centered)
         half_w = cart_pix_width / 2.0

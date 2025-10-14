@@ -29,7 +29,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 def make_env():
     env = gym.make('versaille_env:versaille_env/acc-discrete-v0')
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
+    # env = gym.wrappers.TimeLimit(env, max_episode_steps=1000)
     env = Monitor(env)
     return env
 

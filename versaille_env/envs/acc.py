@@ -45,7 +45,6 @@ class ACCEnv(gym.Env):
         bound = np.array([np.finfo(np.float32).max,np.finfo(np.float32).max])
 
         # Action Space: Choose Acceleration self.A, 0 or self.B
-        # TODO: Change Action Space of the Model
         self.action_space = spaces.Discrete(3)
 
         # State Space: (position, velocity)
@@ -81,16 +80,22 @@ class ACCEnv(gym.Env):
 
     def is_leaving_frame(self, ego_pos, front_pos, screen_width=2000):
         '''
-        Adapted for camera fixed on front car.
+        Adapted for camera fixed on front car - checks if ego too far behind/ahead.
         '''
-        x_scale = screen_width / self.MAX_VALUE
-        front_x_centre = screen_width * 0.75
-
-        world_left = front_pos - front_x_centre / x_scale
-        world_right = front_pos + (screen_width - front_x_centre) / x_scale
+        camera_center_world = ego_pos
+        # camera_center_world = front_pos
+        world_view_width = 100.0  # same as in render!!
         
-        is_leaving = (ego_pos - self.REL_CAR_LENGTH/2) < world_left or (ego_pos + self.REL_CAR_LENGTH/2) > world_right
-
+        world_left = camera_center_world - world_view_width / 2
+        world_right = camera_center_world + world_view_width / 2
+        
+        front_left = front_pos - self.REL_CAR_LENGTH / 2
+        # ego_left = ego_pos - self.REL_CAR_LENGTH / 2
+        front_right = front_pos + self.REL_CAR_LENGTH / 2
+        # ego_right = ego_pos + self.REL_CAR_LENGTH / 2
+        
+        is_leaving = front_left < world_left or front_right > world_right
+        # is_leaving = ego_left < world_left or ego_right > world_right
         return is_leaving
     
     def update_front_action(self, front_pos, front_vel):
@@ -119,12 +124,6 @@ class ACCEnv(gym.Env):
             )
             self.front_timer = 0
         
-        # Enforce safety near boundaries (avoid touching?)
-        # if front_pos >= self.MAX_VALUE - 2 * self.REL_CAR_LENGTH: # 2 * self.REL_CAR_LENGTH??
-        #     self.front_behaviour = "brake"
-        # elif front_pos <= 2 * self.REL_CAR_LENGTH: # 2 * self.REL_CAR_LENGTH??
-        #     self.front_behaviour = "accelerate"
-        
         if self.front_behaviour == "accelerate":
             action = 0
         elif self.front_behaviour == "brake":
@@ -135,21 +134,6 @@ class ACCEnv(gym.Env):
             action = 1
         
         return action
-
-        # # Calculate boundaries
-        # dist_l = front_pos
-        # dist_r = self.MAX_VALUE - front_pos
-
-        # if dist_l <= self.MIN_SEPARATION: # need enough space for at least the ego car to fit
-        #     action_space = [0] # accelerate
-        # elif dist_r <= self.REL_CAR_LENGTH / 2: # can go up to contact with right wall
-        #     action_space = [2] # break
-        # else:
-        #     action_space = [0,1,2] # full action space
-        
-        # # action = random.choice(action_space)
-        # action = self.np_random.choice(action_space)
-        # return action
     
     def update_front_state(self, front_pos, front_vel, front_action):
         '''
@@ -163,8 +147,8 @@ class ACCEnv(gym.Env):
             if getattr(self, "front_behaviour", None) == "emergency_brake":
                 acc = -self.B # strongest deceleration
             else:
-                acc = -self.B
-                # acc = -self.B * self.np_random.uniform(0.1, 0.9)
+                # acc = -self.B
+                acc = -self.B * self.np_random.uniform(0.1, 0.9)
         else:
             raise ValueError(f"Unknown action value {front_action}")
         
@@ -172,42 +156,34 @@ class ACCEnv(gym.Env):
         # pos = acc*t^2/2 + vel_0*t + pos_0
         # vel = vel = acc*t + vel_0
         t = self.TIME_STEP
-        front_pos_0 = front_pos
-        front_vel_0 = front_vel
-        front_pos = acc*t**2/2 + front_vel_0*t + front_pos_0
-        front_vel = acc*t + front_vel_0
+        front_vel_new = acc*t + front_vel
+        front_pos_new = acc*t**2/2 + front_vel_new*t + front_pos # TODO: use front_vel_new or front_vel here???
 
         # enforce boundary constraints
-        front_pos = np.clip(front_pos, self.REL_CAR_LENGTH/2, self.MAX_VALUE - self.REL_CAR_LENGTH/2)
+        front_pos_new = np.clip(front_pos_new, self.REL_CAR_LENGTH/2, self.MAX_VALUE - self.REL_CAR_LENGTH/2)
         # velocity constraints
         max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
-        front_vel = np.clip(front_vel, 0, max_vel)
-        # print(f"Front car velocity: {front_vel}")
+        front_vel_new = np.clip(front_vel_new, 0, max_vel)
+        print(f"New front vel: {front_vel_new}")
 
-        self.front_state = (np.float32(front_pos), np.float32(front_vel))
+        self.front_state = (np.float32(front_pos_new), np.float32(front_vel_new))
 
     def step(self, action):
         '''
-        TODO: double check terminated vs truncated implementation!
         TODO: remove distance penalty now that we have out of frame neg reward?
         '''
         self.current_step += 1
         assert self.action_space.contains(action), "%s (of type %s) invalid" % (str(action), type(action))
 
         # FRONT CAR ---
-        front_state = self.front_state
-        front_pos,front_vel = front_state[0],front_state[1]
-
+        front_pos,front_vel = self.front_state
         front_action = self.update_front_action(front_pos, front_vel)
         self.update_front_state(front_pos, front_vel, front_action)
+        front_pos_new, front_vel_new = self.front_state
         # -------------
         
-        # Get ego state
-        state = self.state
-        ego_pos, ego_vel = state[0],state[1]
-
-        # Determine acceleration:
-        # TODO: Update choice of acceleration based on changed action space
+        # EGO CAR -----
+        ego_pos, ego_vel = self.state
         acc = 0
         if action==0:
             acc = self.A 
@@ -222,40 +198,31 @@ class ACCEnv(gym.Env):
         # pos = acc*t^2/2 + vel_0*t + pos_0
         # vel = vel = acc*t + vel_0
         t = self.TIME_STEP
+        ego_vel_new = acc*t + ego_vel
+        ego_vel_new = np.clip(ego_vel_new, 0, None)
+        ego_pos_new = acc*t**2/2 + ego_vel_new*t + ego_pos # TODO: use ego_vel_new or ego_vel here???
+        self.state = (np.float32(ego_pos_new), np.float32(ego_vel_new))
+        # -------------
 
-        pos_0 = ego_pos
-        vel_0 = ego_vel
-        ego_pos = acc*t**2/2 + vel_0*t + pos_0
-        ego_vel = acc*t + vel_0
-        ego_vel = np.clip(ego_vel, 0, None)
-
-        self.state = (ego_pos, ego_vel)
-
-        # Assigning reward
-        front_pos_new, _ = self.front_state
-    
+        # Assigning reward    
         crash = self.is_crash(ego_pos, front_pos_new)
         leaving_frame = self.is_leaving_frame(ego_pos, front_pos_new)
-        # truncated = (ego_pos > self.MAX_VALUE - self.REL_CAR_LENGTH/2 or 
-        #         ego_pos < self.REL_CAR_LENGTH/2 or
-        #         front_pos_new > self.MAX_VALUE - self.REL_CAR_LENGTH/2 or 
-        #         front_pos_new < self.REL_CAR_LENGTH/2)
-        # done = crash or truncated
-        terminated = crash or leaving_frame # TODO: remove leaving_frame!!!
+        
+        terminated = crash
         truncated = self.current_step >= self.max_steps
 
-        distance = front_pos_new - ego_pos
-        optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
-        distance_error = abs(distance - optimal_distance)
-
-        distance_penalty = -0.01 * distance_error # keep???
+        # distance = front_pos_new - ego_pos
+        # optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
+        # distance_error = abs(distance - optimal_distance)
+        # distance_penalty = -0.01 * distance_error # keep???
 
         if crash:
             reward = -20.0
         elif leaving_frame:
             reward = -10.0
         else:
-            reward = 0.1 + distance_penalty
+            reward = 1
+            # reward = 0.1 + distance_penalty
 
         if self.invert_loss:
             reward *= -1.0
@@ -275,7 +242,7 @@ class ACCEnv(gym.Env):
         
         # EGO CAR ---
         min_ego_pos = self.REL_CAR_LENGTH / 2 # stay within frame
-        max_ego_pos = self.MAX_VALUE - self.REL_CAR_LENGTH * 1.5 # some extra space for the front car to fit
+        max_ego_pos = self.MAX_VALUE / 2 - self.REL_CAR_LENGTH * 1.5 # some extra space for the front car to fit
         pos = self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
         
         # We must not approach too fast (in which case braking would not stop us anymore)
@@ -289,7 +256,7 @@ class ACCEnv(gym.Env):
 
         # FRONT CAR ---
         min_front_pos = pos + self.REL_CAR_LENGTH # reset within boundary
-        max_front_pos = self.MAX_VALUE - self.REL_CAR_LENGTH / 2
+        max_front_pos = self.MAX_VALUE / 2 - self.REL_CAR_LENGTH / 2
         front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
         
         front_min_velocity = 0.0
@@ -297,11 +264,6 @@ class ACCEnv(gym.Env):
         front_vel = self.np_random.uniform(low=front_min_velocity, high=front_max_velocity, size=(1,))[0]
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
-        # Debug
-        # actual_distance = front_pos - pos
-        # print(f"Initialized: ego at {pos:.1f}, front at {front_pos:.1f}")
-        # print(f"Ego is {'behind' if actual_distance > 0 else 'ahead of'} front car by {abs(actual_distance):.1f} units")
-        
         return np.array(self.state), {'crash': False}
 
     def render(self, mode='rgb_array', close=False):
@@ -322,19 +284,27 @@ class ACCEnv(gym.Env):
         ego_pos, ego_vel = self.state
         front_pos, front_vel = self.front_state
 
-        scroll_base = front_vel * 2.0
+        camera_centre_world = ego_pos # camera follows ego car
+        # camera_centre_world = front_pos # camera follows front car
+        world_view_width = 100.0 # how much world space is visible
+
+        # Convert world coords to screen coords
+        def world_to_screen(world_x):
+            relative_to_camera = world_x - camera_centre_world
+            screen_centre = screen_width * 0.25
+            return screen_centre + (relative_to_camera / world_view_width) * screen_width
+        
+        scroll_base = ego_vel * 2.0
+        # scroll_base = front_vel * 2.0
 
         pole_speed = scroll_base  # pixels per frame
-        # pole_speed = 10  # pixels per frame
         pole_spacing = 200  # distance between poles in pixels
         pole_width = 10
         pole_height = 60
         
         cloud_speed = scroll_base * 0.1  # slower for parallax
-        # cloud_speed = 1  # slower for parallax
         cloud_spacing = 300
 
-        # hill_speed = 2  # Very slow for distant background
         hill_speed = scroll_base * 0.2  # Very slow for distant background
         hill_spacing = 600  # Distance between hills
 
@@ -345,24 +315,22 @@ class ACCEnv(gym.Env):
         carty = 40 # BOTTOM OF CART
         cartwidth = self.CAR_LENGTH
         cartheight = self.CAR_HEIGHT
-        x_scale = screen_width / self.MAX_VALUE
+        
+        x_scale = screen_width / world_view_width
+        # x_scale = screen_width / self.MAX_VALUE
 
         cart_pix_width = self.REL_CAR_LENGTH * x_scale
         cart_pix_height = cartheight
 
-        relativeDistance = cartwidth * 2
-
         if self.viewer is None:
             pygame.init()
             self.viewer = pygame.display.set_mode((screen_width, screen_height))
-            #pygame.Surface((screen_width, screen_height))
 
             self.nn_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/nn-car.png").convert_alpha()
             self.front_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/front-car.png").convert_alpha()
             original_width, original_height = self.nn_cart.get_size()
 
             scale_factor = cart_pix_width / original_width
-            # scale_factor = cartwidth / original_width
             new_height = int(original_height * scale_factor)
             self.nn_cart = pygame.transform.flip(pygame.transform.smoothscale(self.nn_cart, (int(cart_pix_width), new_height)),False,True)
             self.front_car = pygame.transform.flip(pygame.transform.smoothscale(self.front_cart, (int(cart_pix_width), new_height)),False,True)
@@ -406,45 +374,40 @@ class ACCEnv(gym.Env):
             pygame.draw.rect(self.surf, (0, 0, 0), pygame.Rect(x, carty, pole_width, pole_height))
 
         # CARS!
-        front_x_centre = screen_width * 0.75
-        ego_x = front_x_centre + (ego_pos - front_pos) * x_scale
-        front_x = front_x_centre
-        # front_x = front_pos * x_scale
-        # ego_x = ego_pos * x_scale
+        # Convert world positions to screen positions
+        ego_x = world_to_screen(ego_pos)
+        front_x = world_to_screen(front_pos)
+        # front_x_centre = screen_width * 0.75
+        # ego_x = front_x_centre + (ego_pos - front_pos) * x_scale
+        # front_x = front_x_centre
                    
         # Converting centre to upper-left for blit (so image is centered)
         half_w = cart_pix_width / 2.0
         # Add a follower cart
         l,r = -half_w, 0.0
-        # l,r = -cartwidth, 0.0
         t,b = cartheight, 0.0
         l += ego_x
-        b += carty*0.75
-        #gfxdraw.filled_polygon(self.surf, coords, (0,0,0))
+        b += carty*0.25
         self.surf.blit(self.nn_cart, (l,b)) # (l,b) is upper-left corner
 
         # Add leader cart
         l,r = -half_w, 0.0
-        # l,r = -cartwidth, 0.0
         t,b = cartheight, 0.0
         l += front_x
-        b += carty*0.75
+        b += carty*0.25
         self.surf.blit(self.front_car, (l,b))
 
         stripe_color = (228, 228, 228)  # Yellow stripe
-
         for x in self.stripe_positions:
             pygame.draw.rect(
                 self.surf,
                 stripe_color,
                 pygame.Rect(x, 0, stripe_width, stripe_height)
             )
-
-        # Display track
-        #gfxdraw.hline(self.surf, 0, screen_width, carty, (0, 0, 0))
         
         self.surf = pygame.transform.flip(self.surf, False, True)
         self.viewer.blit(self.surf, (0, 0))
+
         return np.transpose(np.array(pygame.surfarray.pixels3d(self.viewer)), axes=(1, 0, 2))
 
     def close(self):

@@ -216,22 +216,37 @@ class ACCEnv(gym.Env):
 
         # Assigning reward    
         crash = self.is_crash(ego_pos, front_pos_new)
-        # leaving_frame = self.is_leaving_frame(ego_pos, front_pos_new)
-        
         terminated = crash
         truncated = self.current_step >= self.max_steps
 
-        distance = front_pos_new - ego_pos_new
-        optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
-        distance_error = abs(distance - optimal_distance)
-        distance_penalty = -0.05 * distance_error
-
         if crash:
-            reward = -50.0
-        # elif leaving_frame:
-        #     reward = -10.0
+            reward = -10.0
         else:
-            reward = 0.1 + distance_penalty
+            reward = 0.1
+            
+            # distance reward
+            current_distance = front_pos_new - ego_pos_new
+            ideal_min_distance = 2.0 * self.REL_CAR_LENGTH # somewhat arbitrary
+            ideal_max_distance = 4.0 * self.REL_CAR_LENGTH
+            
+            if current_distance < ideal_min_distance: # too close
+                reward -= 0.5
+            elif current_distance > ideal_max_distance: # too far
+                reward -= 0.2
+            else:
+                reward += 0.2
+
+        # distance = front_pos_new - ego_pos_new
+        # optimal_distance = 2 * self.REL_CAR_LENGTH # somewhat arbitrary
+        # distance_error = abs(distance - optimal_distance)
+        # distance_penalty = -0.05 * distance_error
+
+        # if crash:
+        #     reward = -50.0
+        # # elif leaving_frame:
+        # #     reward = -10.0
+        # else:
+        #     reward = 0.1 + distance_penalty
 
         if self.invert_loss:
             reward *= -1.0
@@ -263,7 +278,8 @@ class ACCEnv(gym.Env):
         pos = self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
         
         # We must not approach too fast (in which case braking would not stop us anymore)
-        min_velocity = -np.sqrt(pos*2*self.B)
+        # min_velocity = -np.sqrt(pos*2*self.B)
+        min_velocity = 0
         # Hypothetical constraint on the other side:
         # (MAX_VALUE-pos) <= vel^2 / (2*B)
         # We must not fall behind too fast (in which case accelerating would not help us anymore)

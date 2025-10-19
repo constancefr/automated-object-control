@@ -41,9 +41,12 @@ class ACCEnv(gym.Env):
         self.TIME_STEP = 0.1
 
         # Maximal forward acceleration
-        self.A = 3.1
+        self.A = 3
         # Maximal braking acceleration
-        self.B = 5.5
+        self.Bmin = 1
+        self.Bmax = 5
+        # Maximal velocity
+        self.Vmax = 20.0
         
         bound = np.array([np.finfo(np.float32).max,np.finfo(np.float32).max])
 
@@ -76,10 +79,10 @@ class ACCEnv(gym.Env):
         return [seed]
 
     def is_crash(self, ego_pos, front_pos):
-        ego_front_bumper = ego_pos + self.REL_CAR_LENGTH/2
-        front_rear_bumper = front_pos - self.REL_CAR_LENGTH/2
-        
-        crash = ego_front_bumper >= front_rear_bumper
+        # ego_front_bumper = ego_pos + self.REL_CAR_LENGTH/2
+        # front_rear_bumper = front_pos - self.REL_CAR_LENGTH/2
+        # crash = ego_front_bumper >= front_rear_bumper
+        crash = (front_pos - ego_pos <= self.REL_CAR_LENGTH)
         return crash
 
     # def is_leaving_frame(self, ego_pos, front_pos, screen_width=2000):
@@ -150,10 +153,10 @@ class ACCEnv(gym.Env):
             acc = 0
         elif front_action==2:
             if getattr(self, "front_behaviour", None) == "emergency_brake":
-                acc = -self.B # strongest deceleration
+                acc = -self.Bmax
             else:
                 # acc = -self.B
-                acc = -self.B * self.np_random.uniform(0.1, 0.9)
+                acc = -self.np_random.uniform(self.Bmin, self.Bmax)
         else:
             raise ValueError(f"Unknown action value {front_action}")
         
@@ -162,13 +165,14 @@ class ACCEnv(gym.Env):
         # vel = vel = acc*t + vel_0
         t = self.TIME_STEP
         front_vel_new = acc*t + front_vel
+        np.clip(front_vel_new, 0, self.Vmax)
         front_pos_new = acc*t**2/2 + front_vel_new*t + front_pos # TODO: use front_vel_new or front_vel here???
 
         # enforce boundary constraints
-        front_pos_new = np.clip(front_pos_new, self.REL_CAR_LENGTH/2, self.MAX_VALUE - self.REL_CAR_LENGTH/2)
+        # front_pos_new = np.clip(front_pos_new, self.REL_CAR_LENGTH/2, self.MAX_VALUE - self.REL_CAR_LENGTH/2)
         # velocity constraints
-        max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
-        front_vel_new = np.clip(front_vel_new, 0, max_vel)
+        # max_vel = np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A))
+        # front_vel_new = np.clip(front_vel_new, 0, max_vel)
 
         self.front_state = (np.float32(front_pos_new), np.float32(front_vel_new))
 
@@ -200,7 +204,7 @@ class ACCEnv(gym.Env):
         elif action==1:
             acc = 0.0
         elif action==2:
-            acc = -self.B
+            acc = -self.Bmax # only allow max brake????
         else:
             raise ValueError(f"Unknown action value {action}")
 
@@ -209,7 +213,7 @@ class ACCEnv(gym.Env):
         # vel = vel = acc*t + vel_0
         t = self.TIME_STEP
         ego_vel_new = acc*t + ego_vel
-        ego_vel_new = np.clip(ego_vel_new, 0, None)
+        ego_vel_new = np.clip(ego_vel_new, 0, self.Vmax)
         ego_pos_new = acc*t**2/2 + ego_vel_new*t + ego_pos # TODO: use ego_vel_new or ego_vel here???
         self.state = (np.float32(ego_pos_new), np.float32(ego_vel_new))
         # -------------
@@ -260,6 +264,17 @@ class ACCEnv(gym.Env):
         return np.array(self.state,dtype=np.float32), reward, terminated, truncated, info
     
     def reset(self, seed=None, options=None):
+        '''
+        Safety constraints at initialisation:
+        - min distance of L between cars
+        - min dist of L between cars if both were to brake (front at max brake, ego at current brake)
+        - other constraints enforced (min/max acceleration and velocity)
+        
+        pos_e(B_min) + L < pos_o
+        => x_e - (v_e^2 / 2*a_e) + L < x_o - (v_o^2 / 2*a_o)
+        => x_e - (v_e^2 / 2*B_min) + L < x_o - (v_o^2 / 2*B_max) # assume worst case scenario (max braking for front car, min for ego)
+        '''
+
         # If you want to change the state initialization, this is the place to go...
         if seed is not None:
             self._seed(seed=seed)
@@ -271,32 +286,24 @@ class ACCEnv(gym.Env):
             assert (isinstance(state, list) or isinstance(state, tuple)) and len(state) == 2, "New state must be tuple/list with 2 components"
             self.state = (np.float32(state[0]), np.float32(state[1]))
             return np.array(self.state), {'crash': self.is_crash(state)}
-        
-        # EGO CAR ---
+    
+        # 1: randomly set ego_pos x_e (within frame, allowing space for front car)
         min_ego_pos = self.REL_CAR_LENGTH / 2 # stay within frame
-        max_ego_pos = self.MAX_VALUE / 2 - self.REL_CAR_LENGTH * 1.5 # some extra space for the front car to fit
-        pos = self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
-        
-        # We must not approach too fast (in which case braking would not stop us anymore)
-        # min_velocity = -np.sqrt(pos*2*self.B)
-        min_velocity = 0
-        # Hypothetical constraint on the other side:
-        # (MAX_VALUE-pos) <= vel^2 / (2*B)
-        # We must not fall behind too fast (in which case accelerating would not help us anymore)
-        max_velocity = np.sqrt((self.MAX_VALUE-pos)*2*self.A)
-        vel = self.np_random.uniform(low=min_velocity,high=max_velocity, size=(1,))[0]
-        self.state = (np.float32(pos), np.float32(vel))
+        max_ego_pos = self.MAX_VALUE / 2 # left hand side of frame at init
+        ego_pos = self.np_random.uniform(low=min_ego_pos, high=max_ego_pos, size=(1,))[0]
 
-        # FRONT CAR ---
-        min_front_pos = pos + self.REL_CAR_LENGTH # reset within boundary
-        max_front_pos = self.MAX_VALUE / 2 - self.REL_CAR_LENGTH / 2
-        front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
-        
-        front_min_velocity = 0.0
-        front_max_velocity = min(np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A)), 20.0)
-        front_vel = self.np_random.uniform(low=front_min_velocity, high=front_max_velocity, size=(1,))[0]
+        # 2: randomly set ego_vel v_e (positive, up to max V)
+        ego_vel = self.np_random.uniform(low=0,high=self.Vmax, size=(1,))[0]
+        self.state = (np.float32(ego_pos), np.float32(ego_vel))
+
+        # 3: randomly set front_vel v_o (positive, up to max V)
+        front_vel = self.np_random.uniform(low=0,high=self.Vmax, size=(1,))[0]
+
+        # 4: set front_pos x_o s.t. x_o > x_e - (v_e^2 / 2*B_min) + (v_o^2 / 2*B_max)
+        min_front_pos = ego_pos - (ego_vel**2 / 2*self.Bmin) + (front_vel**2 / 2*self.Bmax)
+        front_pos = self.np_random.uniform(low=min_front_pos,high=min_front_pos + self.MAX_VALUE/2, size=(1,))[0] # allow front car to be up to 1/2 window width away from ego (somewhat arbitrary)
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
-
+        
         info = {
             'crash': False,
             'front_state': self.front_state,
@@ -304,6 +311,26 @@ class ACCEnv(gym.Env):
         }
 
         return np.array(self.state), info
+
+        # # We must not approach too fast (in which case braking would not stop us anymore)
+        # # min_velocity = -np.sqrt(pos*2*self.B)
+        # min_velocity = 0
+        # # Hypothetical constraint on the other side:
+        # # (MAX_VALUE-pos) <= vel^2 / (2*B)
+        # # We must not fall behind too fast (in which case accelerating would not help us anymore)
+        # max_velocity = np.sqrt((self.MAX_VALUE-pos)*2*self.A)
+        # ego_vel = self.np_random.uniform(low=min_velocity,high=max_velocity, size=(1,))[0]
+        # self.state = (np.float32(pos), np.float32(ego_vel))
+
+        # # FRONT CAR ---
+        # min_front_pos = pos + self.REL_CAR_LENGTH # reset within boundary
+        # max_front_pos = self.MAX_VALUE / 2 - self.REL_CAR_LENGTH / 2
+        # front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
+        
+        # front_min_velocity = 0.0
+        # front_max_velocity = min(np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A)), 20.0)
+        # front_vel = self.np_random.uniform(low=front_min_velocity, high=front_max_velocity, size=(1,))[0]
+        # self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
     def render(self, mode='rgb_array', close=False):
         os.environ["SDL_VIDEODRIVER"] = "dummy" # required when running on remote server without GUI
@@ -368,8 +395,8 @@ class ACCEnv(gym.Env):
             pygame.display.set_mode((1,1))
             self.viewer = True  # dummy flag, no window
 
-            self.nn_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/nn-car.png").convert_alpha()
-            self.front_cart = pygame.image.load("/home/s2908217/autonomous_car_control/versaille_env/front-car.png").convert_alpha()
+            self.nn_cart = pygame.image.load("nn-car.png").convert_alpha()
+            self.front_cart = pygame.image.load("front-car.png").convert_alpha()
             original_width, original_height = self.nn_cart.get_size()
 
             scale_factor = cart_pix_width / original_width

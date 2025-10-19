@@ -1,4 +1,4 @@
-name: car_control_env
+name: car-control
 channels:
 - conda-forge
 - defaults

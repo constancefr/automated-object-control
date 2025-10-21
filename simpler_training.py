@@ -67,17 +67,15 @@ def main():
     model = DQN(
         "MlpPolicy",
         env,
-        learning_rate=1e-4,
-        buffer_size=50000,
-        learning_starts=5000,
-        batch_size=128,
-        gamma=0.98,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=64,
+        gamma=0.99,
         train_freq=4,
         gradient_steps=1,
-        target_update_interval=1000,
-        exploration_final_eps=0.02,   # Lower final exploration
-        exploration_fraction=0.3,     # Longer exploration period
-        policy_kwargs=dict(net_arch=[256, 256], activation_fn=torch.nn.ReLU),
+        target_update_interval=500,
+        policy_kwargs=dict(net_arch=[256, 256]),
         verbose=0,
     )
 

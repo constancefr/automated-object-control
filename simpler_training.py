@@ -82,7 +82,7 @@ def main():
     NUM_ROUNDS = 100
     NUM_TRAINING_STEPS_PER_ROUND = 10000
     NUM_TESTS_PER_ROUND = 100
-    MODEL_FILENAME_BASE = "models/acc_dqn"
+    MODEL_FILENAME_BASE = "dqn_models/acc_dqn"
 
     FPS = 30
     VIDEO_INTERVAL = 10

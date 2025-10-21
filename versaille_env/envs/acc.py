@@ -89,31 +89,33 @@ class ACCEnv(gym.Env):
     
     def update_front_action(self, front_pos, front_vel):
         '''
-        Computes next action for the front car.
-        Includes stochastic behaviour (emergency braking, gradual acceleration, inertia in behaviour changes).
+        Mostly cruising at high speed with occasional braking.
         '''
         if not hasattr(self, "front_behaviour"):
             self.front_behaviour = "cruise"
             self.front_timer = 0
+            self.emergency_brake_active = False
 
-        # change behaviour every 20-40 steps
         self.front_timer += 1
         dist_l = front_pos
         dist_r = self.MAX_VALUE - front_pos
         if self.front_timer > self.np_random.integers(20, 40):
             self.front_behaviour = self.np_random.choice(
                 ["cruise", "accelerate", "brake", "emergency_brake"],
-                p=[0.5, 0.3, 0.1, 0.1]
+                p=[0.50, 0.40, 0.10, 0.00]  # 50% cruise, 40% accelerate, 10% brake
             )
             self.front_timer = 0
-        
+            
+            if self.front_behaviour == "emergency_brake":
+                self.emergency_brake_active = True
+
         if self.front_behaviour == "accelerate":
             action = 0
         elif self.front_behaviour == "brake":
             action = 2
         elif self.front_behaviour == "emergency_brake":
             action = 2
-        else: # cruise
+        else:  # cruise
             action = 1
 
         self.last_front_action = action

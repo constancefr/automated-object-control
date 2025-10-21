@@ -12,17 +12,9 @@
 module purge
 module load anaconda3
 
-# Initialize conda and activate env
 source $HOME/.bashrc
 conda activate car_control_env
 
-# Debug env info
-echo "=== Environment Information ==="
-echo "Conda environment: $CONDA_DEFAULT_ENV"
-echo "Python path: $(which python)"
-echo "Working directory: $(pwd)"
-echo "================================="
-
 python simpler_training.py
 
-echo "Training completed!"
+echo "Training complete"

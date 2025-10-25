@@ -79,6 +79,10 @@ class ACCEnv(gym.Env):
         self.front_state = None
         self.last_front_action = 1 # idle default
 
+        # to access action in render()
+        self.ego_action = 1 # default idle
+        self.front_action = 1
+
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
@@ -110,16 +114,16 @@ class ACCEnv(gym.Env):
                 self.emergency_brake_active = True
 
         if self.front_behaviour == "accelerate":
-            action = 0
+            self.front_action = 0
         elif self.front_behaviour == "brake":
-            action = 2
+            self.front_action = 2
         elif self.front_behaviour == "emergency_brake":
-            action = 2
+            self.front_action = 2
         else:  # cruise
-            action = 1
+            self.front_action = 1
 
-        self.last_front_action = action
-        return action
+        self.last_front_action = self.front_action
+        return self.front_action
     
     def update_front_state(self, front_pos, front_vel, front_action):
         '''
@@ -170,6 +174,7 @@ class ACCEnv(gym.Env):
             except Exception:
                 action = int(action[0])
 
+        self.ego_action = action
         acc = 0
         if action==0:
             acc = self.A # only allow max acceleration??
@@ -432,6 +437,36 @@ class ACCEnv(gym.Env):
                 stripe_color,
                 pygame.Rect(x, 0, stripe_width, stripe_height)
             )
+
+        # Add colour dial to indicate action taken
+        green = (0, 255, 0)
+        yellow = (255, 255, 0)
+        red = (255, 0, 0)
+
+        if self.ego_action == 0: # accelerate
+            ego_colour = green
+        elif self.ego_action == 1: # idle
+            ego_colour = yellow
+        elif self.ego_action == 2: # break
+            ego_colour = red
+
+        if self.front_action == 0: # accelerate
+            front_colour = green
+        elif self.front_action == 1: # idle
+            front_colour = yellow
+        elif self.front_action == 2: # break
+            front_colour = red
+
+        pygame.draw.circle(
+            self.surf, 
+            ego_colour, 
+            (screen_width-100, screen_height-50),
+            20)
+        pygame.draw.circle(
+            self.surf, 
+            front_colour, 
+            (screen_width-50, screen_height-50),
+            20)
 
         rgb_surface = pygame.transform.flip(self.surf, False, True)
         frame = pygame.surfarray.array3d(rgb_surface)

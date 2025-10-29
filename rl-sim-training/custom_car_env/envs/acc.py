@@ -201,7 +201,7 @@ class ACCEnv(gym.Env):
         truncated = self.current_step >= self.max_steps
 
         if crash:
-            reward = -10.0
+            reward = -20.0
         else:
             reward = 0.1
             

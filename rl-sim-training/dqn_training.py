@@ -67,17 +67,32 @@ def main():
     model = DQN(
         "MlpPolicy",
         env,
-        learning_rate=5e-4,
-        buffer_size=15000,
+        learning_rate=1e-4,
+        buffer_size=100_000,
         learning_starts=1000,
         batch_size=64,
-        gamma=0.99,
-        train_freq=4,
+        gamma=0.98,
+        train_freq=1,
         gradient_steps=1,
-        target_update_interval=500,
+        target_update_interval=1000,
         policy_kwargs=dict(net_arch=[256, 256]),
         verbose=0,
     )
+
+    # model = DQN(
+    #     "MlpPolicy",
+    #     env,
+    #     learning_rate=5e-4,
+    #     buffer_size=15000,
+    #     learning_starts=1000,
+    #     batch_size=64,
+    #     gamma=0.99,
+    #     train_freq=4,
+    #     gradient_steps=1,
+    #     target_update_interval=500,
+    #     policy_kwargs=dict(net_arch=[256, 256]),
+    #     verbose=0,
+    # )
 
     NUM_ROUNDS = 100
     NUM_TRAINING_STEPS_PER_ROUND = 10000

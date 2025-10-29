@@ -1,0 +1,11 @@
+gymnasium
+numpy
+pygame
+tensorflow
+pandas
+scikit-learn
+matplotlib
+ipython
+joblib
+lime
+plotly

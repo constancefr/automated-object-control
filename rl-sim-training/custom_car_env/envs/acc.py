@@ -53,7 +53,7 @@ class ACCEnv(gym.Env):
         # Maximal velocity
         self.Vmax = 20.0
         
-        bound = np.array([np.finfo(np.float32).max,np.finfo(np.float32).max])
+        bound = np.array([np.finfo(np.float32).max,np.finfo(np.float32).max,np.finfo(np.float32).max,np.finfo(np.float32).max])
 
         # Action Space: Choose Acceleration self.A, 0 or self.B
         self.action_space = spaces.Discrete(3)
@@ -200,23 +200,29 @@ class ACCEnv(gym.Env):
         terminated = crash
         truncated = self.current_step >= self.max_steps
 
-        if crash:
-            reward = -20.0
-        else:
-            reward = 0.1
+        # Reward function taken from highway-env guidelines and kept simple.
+        # Encourages high speed while avoiding collision.
+        a = 0.1
+        b = 10
+        reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+        # if crash:
+        #     reward = -20.0
+        # else:
+        #     reward = 0.1
             
-            # distance reward
-            current_distance = front_pos_new - ego_pos_new
-            # ideal_min_distance = self.REL_CAR_LENGTH # to avoid collision
-            ideal_max_distance = 2.0 * self.REL_CAR_LENGTH # somewhat arbitrary
-            # TODO: change to 2x rather than 3
+        #     # distance reward
+        #     current_distance = front_pos_new - ego_pos_new
+        #     # ideal_min_distance = self.REL_CAR_LENGTH # to avoid collision
+        #     ideal_max_distance = 2.0 * self.REL_CAR_LENGTH # somewhat arbitrary
+        #     # TODO: change to 2x rather than 3
             
-            # if current_distance <= ideal_min_distance: # too close
-            #     reward -= 0.5
-            if current_distance > ideal_max_distance: # too far
-                reward -= 0.2
-            else:
-                reward += 0.2
+        #     # if current_distance <= ideal_min_distance: # too close
+        #     #     reward -= 0.5
+        #     if current_distance > ideal_max_distance: # too far
+        #         reward -= 0.2
+        #     else:
+        #         reward += 0.2
 
         if self.invert_loss:
             reward *= -1.0
@@ -227,7 +233,15 @@ class ACCEnv(gym.Env):
             'front_action': getattr(self, 'last_front_action', 0)
         }
 
-        return np.array(self.state,dtype=np.float32), reward, terminated, truncated, info
+        full_state = np.array([
+            ego_pos_new,
+            ego_vel_new,
+            front_pos_new,
+            front_vel_new
+        ], dtype=np.float32)
+
+        return full_state, reward, terminated, truncated, info
+        # return np.array(self.state,dtype=np.float32), reward, terminated, truncated, info
     
     def reset(self, seed=None, options=None):
         '''
@@ -251,7 +265,16 @@ class ACCEnv(gym.Env):
             state = options["new_state"]
             assert (isinstance(state, list) or isinstance(state, tuple)) and len(state) == 2, "New state must be tuple/list with 2 components"
             self.state = (np.float32(state[0]), np.float32(state[1]))
-            return np.array(self.state), {'crash': self.is_crash(state)}
+
+            full_state = np.array([
+                ego_pos,
+                ego_vel,
+                front_pos,
+                front_vel
+            ], dtype=np.float32)
+
+            return full_state, {'crash': self.is_crash(state)}
+            # return np.array(self.state), {'crash': self.is_crash(state)}
     
         # 1: set ego_pos x_e
         ego_pos = 0.0
@@ -266,7 +289,10 @@ class ACCEnv(gym.Env):
         # 4: set front_pos x_o s.t. x_o > x_e - (v_e^2 / 2*B_min) + (v_o^2 / 2*B_max) + L
         min_front_pos = ego_pos - (ego_vel**2 / 2*(self.Bmin)) + (front_vel**2 / 2*(self.Bmax)) + self.REL_CAR_LENGTH
         # NOTE: check maths here because min_front_pos is often negative
-        min_front_pos = max(min_front_pos, ego_pos + self.REL_CAR_LENGTH)
+        # TODO make bmin and bmax negative??
+        # TODO add small epsilon to position s.t. < and not <=
+        eps = 0.00001
+        min_front_pos = max(min_front_pos+eps, ego_pos + self.REL_CAR_LENGTH)
         # front_pos = min_front_pos
         front_pos = self.np_random.uniform(low=min_front_pos,high=min_front_pos + self.MAX_VALUE/2, size=(1,))[0] # max is somewhat arbitrary
         self.front_state = (np.float32(front_pos), np.float32(front_vel))
@@ -277,7 +303,16 @@ class ACCEnv(gym.Env):
             'front_action': 1 # default idle
         }
 
-        return np.array(self.state), info
+        full_state = np.array([
+            ego_pos,
+            ego_vel,
+            front_pos,
+            front_vel
+        ], dtype=np.float32)
+
+        return full_state, info
+
+        # return np.array(self.state), info
 
         # # We must not approach too fast (in which case braking would not stop us anymore)
         # # min_velocity = -np.sqrt(pos*2*self.B)

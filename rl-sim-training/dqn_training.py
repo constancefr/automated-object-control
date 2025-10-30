@@ -7,6 +7,9 @@ from stable_baselines3 import DQN
 import torch
 import os
 
+trial_round = 6
+trial_dir = f"results/trial_{trial_round}"
+
 def test_model(env, model, video_writer=None, msg=None):
     '''
     Runs one episode and returns reward + frames.
@@ -47,7 +50,7 @@ def test_model(env, model, video_writer=None, msg=None):
     return ep_len, ep_rew, frames
 
 def setup_environment():
-    env = gym.make("versaille_env:versaille_env/acc-discrete-v0", render_mode="rgb_array")
+    env = gym.make("custom_car_env:custom_car_env/acc-discrete-v0", render_mode="rgb_array")
     
     # Test rendering
     obs, info = env.reset()
@@ -67,16 +70,17 @@ def main():
     model = DQN(
         "MlpPolicy",
         env,
-        learning_rate=1e-4,
-        buffer_size=100_000,
+        learning_rate=5e-4,
+        buffer_size=15000,
         learning_starts=1000,
-        batch_size=64,
-        gamma=0.98,
-        train_freq=1,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
         gradient_steps=1,
-        target_update_interval=1000,
+        target_update_interval=50,
         policy_kwargs=dict(net_arch=[256, 256]),
         verbose=0,
+        tensorboard_log=f"{trial_dir}/car_dqn/"
     )
 
     # model = DQN(
@@ -95,13 +99,13 @@ def main():
     # )
 
     NUM_ROUNDS = 100
-    NUM_TRAINING_STEPS_PER_ROUND = 10000
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
     NUM_TESTS_PER_ROUND = 100
-    MODEL_FILENAME_BASE = "dqn_models/acc_dqn"
+    MODEL_FILENAME_BASE = f"{trial_dir}/dqn_models/acc_dqn"
 
     FPS = 30
     VIDEO_INTERVAL = 10
-    VIDEO_DIR = "videos"
+    VIDEO_DIR = f"{trial_dir}/videos"
 
     os.makedirs(VIDEO_DIR, exist_ok=True)
 
@@ -161,7 +165,7 @@ def main():
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig("training_stats.png")
+    plt.savefig(f"{trial_dir}/training_stats.png")
     plt.show()
 
 if __name__ == "__main__":

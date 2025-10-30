@@ -1,0 +1,157 @@
+TRIAL #1 ---
+Reward function:
+    a = 1
+    b = 1
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+Hyperparameters:
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=4,
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log="car_dqn/"
+    )
+    NUM_ROUNDS = 50
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100
+
+
+TRIAL #2 ---
+Reward function:
+    a = 1
+    b = 1
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+Hyperparameters:
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=4,
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log="car_dqn/"
+    )
+    NUM_ROUNDS = 50
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 10
+
+
+TRIAL #3 ---
+Reward function:
+    a = 1
+    b = 1
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+Hyperparameters:
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=1, ##################
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log="car_dqn/"
+    )
+    NUM_ROUNDS = 50
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100
+
+
+TRIAL #4 ---
+Reward function:
+    a = 0.1
+    b = 10
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=1,
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log=f"{trial_dir}/car_dqn/"
+    )
+    NUM_ROUNDS = 50
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100
+
+
+TRIAL #5 --- BEST SETUP SO FAR!
+Reward function:
+    a = 0.1
+    b = 1 ###
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=1,
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log=f"{trial_dir}/car_dqn/"
+    )
+    NUM_ROUNDS = 50
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100
+
+
+TRIAL #6 ---
+Reward function:
+    a = 0.1
+    b = 10 ###
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=1,
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log=f"{trial_dir}/car_dqn/"
+    )
+    NUM_ROUNDS = 100 ###
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100

@@ -205,7 +205,6 @@ class ACCEnv(gym.Env):
         a = 0.1
         b = 10
         reward = a * (ego_vel_new / self.Vmax) - b * crash
-
         # if crash:
         #     reward = -20.0
         # else:
@@ -430,16 +429,16 @@ class ACCEnv(gym.Env):
 
         # Draw clouds
         for (x, y) in self.cloud_positions:
-            pygame.draw.ellipse(self.surf, (255, 255, 255), pygame.Rect(x, y, 80, 40))
+            pygame.draw.ellipse(self.surf, (255, 255, 255), pygame.Rect(int(x), int(y), 80, 40))
 
         for x in self.hill_positions:
-            pygame.draw.ellipse(self.surf, (0, 128, 0), pygame.Rect(x, 10, 400, 120))  # Dark green hills
+            pygame.draw.ellipse(self.surf, (0, 128, 0), pygame.Rect(int(x), 10, 400, 120))  # Dark green hills
 
-        pygame.draw.rect(self.surf, (34, 139, 34), pygame.Rect(0, carty, screen_width, carty)) # road?
-        pygame.draw.rect(self.surf, (192, 192, 192), pygame.Rect(0, 0, screen_width, carty))
+        pygame.draw.rect(self.surf, (34, 139, 34), pygame.Rect(0, int(carty), int(screen_width), int(carty))) # road?
+        pygame.draw.rect(self.surf, (192, 192, 192), pygame.Rect(0, 0, int(screen_width), int(carty)))
 
         for x in self.pole_positions:
-            pygame.draw.rect(self.surf, (0, 0, 0), pygame.Rect(x, carty, pole_width, pole_height))
+            pygame.draw.rect(self.surf, (0, 0, 0), pygame.Rect(int(x), int(carty), int(pole_width), int(pole_height)))
 
         # CARS!
         # Convert world positions to screen positions
@@ -470,7 +469,7 @@ class ACCEnv(gym.Env):
             pygame.draw.rect(
                 self.surf,
                 stripe_color,
-                pygame.Rect(x, 0, stripe_width, stripe_height)
+                pygame.Rect(int(x), 0, stripe_width, stripe_height)
             )
 
         # Add colour dial to indicate action taken

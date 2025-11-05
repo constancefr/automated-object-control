@@ -205,23 +205,6 @@ class ACCEnv(gym.Env):
         a = 0.1
         b = 10
         reward = a * (ego_vel_new / self.Vmax) - b * crash
-        # if crash:
-        #     reward = -20.0
-        # else:
-        #     reward = 0.1
-            
-        #     # distance reward
-        #     current_distance = front_pos_new - ego_pos_new
-        #     # ideal_min_distance = self.REL_CAR_LENGTH # to avoid collision
-        #     ideal_max_distance = 2.0 * self.REL_CAR_LENGTH # somewhat arbitrary
-        #     # TODO: change to 2x rather than 3
-            
-        #     # if current_distance <= ideal_min_distance: # too close
-        #     #     reward -= 0.5
-        #     if current_distance > ideal_max_distance: # too far
-        #         reward -= 0.2
-        #     else:
-        #         reward += 0.2
 
         if self.invert_loss:
             reward *= -1.0
@@ -310,28 +293,6 @@ class ACCEnv(gym.Env):
         ], dtype=np.float32)
 
         return full_state, info
-
-        # return np.array(self.state), info
-
-        # # We must not approach too fast (in which case braking would not stop us anymore)
-        # # min_velocity = -np.sqrt(pos*2*self.B)
-        # min_velocity = 0
-        # # Hypothetical constraint on the other side:
-        # # (MAX_VALUE-pos) <= vel^2 / (2*B)
-        # # We must not fall behind too fast (in which case accelerating would not help us anymore)
-        # max_velocity = np.sqrt((self.MAX_VALUE-pos)*2*self.A)
-        # ego_vel = self.np_random.uniform(low=min_velocity,high=max_velocity, size=(1,))[0]
-        # self.state = (np.float32(pos), np.float32(ego_vel))
-
-        # # FRONT CAR ---
-        # min_front_pos = pos + self.REL_CAR_LENGTH # reset within boundary
-        # max_front_pos = self.MAX_VALUE / 2 - self.REL_CAR_LENGTH / 2
-        # front_pos = self.np_random.uniform(low=min_front_pos, high=max_front_pos, size=(1,))[0]
-        
-        # front_min_velocity = 0.0
-        # front_max_velocity = min(np.sqrt(max(0.0, (self.MAX_VALUE - front_pos) * 2 * self.A)), 20.0)
-        # front_vel = self.np_random.uniform(low=front_min_velocity, high=front_max_velocity, size=(1,))[0]
-        # self.front_state = (np.float32(front_pos), np.float32(front_vel))
 
     def render(self, mode='rgb_array', close=False):
         os.environ["SDL_VIDEODRIVER"] = "dummy" # required when running on remote server without GUI

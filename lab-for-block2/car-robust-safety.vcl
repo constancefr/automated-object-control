@@ -4,7 +4,7 @@
 
 --------------------------------------------------------------------------------
 -- Utilities
-
+eta = 0.01
 
 --------------------------------------------------------------------------------
 -- Inputs
@@ -74,6 +74,11 @@ actionToTake : Index 3 -> Input -> Bool
 actionToTake i x = forall j . 
     i != j => nnModel x ! i >= nnModel x ! j
 
+-- This gives f(x)_j for every (j != i)
+smallerThanEta : Index 3 -> Input -> Bool
+smallerThanEta i x = forall j .
+    i != j => nnModel x ! j <= eta
+
 
 
 --------------------------------------------------------------------------------
@@ -92,11 +97,17 @@ boundedByEpsilon x = forall i . -epsilon <= x ! i  <= epsilon
 
 -- This will check the robust safety around the action point
 -- 
-robustSafetyAround : UnnormalisedInput -> Label -> Bool
+robustSafetyAround : Input -> Label -> Bool
 robustSafetyAround x action = forall pertubation .
     let xPerturbed = x - pertubation in
     (boundedByEpsilon pertubation) and validInput (xPerturbed) =>
     actionToTake action xPerturbed
+
+strongRobustSafetyAround : Input -> Label -> Bool
+strongRobustSafetyAround x action = forall pertubation .
+    let xPerturbed = x - pertubation in
+    (boundedByEpsilon pertubation) and validInput (xPerturbed) =>
+    smallerThanEta action xPerturbed
 
 --------------------------------------------------------------------------------
 -- Robustness with respect to a dataset
@@ -118,7 +129,10 @@ robust = foreach i .
     robustSafetyAround (trainingInputs ! i) (trainingLabels ! i)
 
 
-
+@property
+strongRobust : Vector Bool n
+strongRobust = foreach i . 
+    strongRobustSafetyAround (trainingInputs ! i) (trainingLabels ! i)
 
 
 

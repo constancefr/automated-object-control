@@ -66,7 +66,7 @@ normNnModel x = nnModel (normalise x)
 
 actionToTake : Index 3 -> UnnormalisedInput -> Bool
 actionToTake i x = forall j . 
-    i != j => normNnModel x ! i <= normNnModel x ! j
+    i != j => normNnModel x ! i >= normNnModel x ! j
 
 --------------------------------------------------------------------------------
 -- Definition of safety robustness around an action

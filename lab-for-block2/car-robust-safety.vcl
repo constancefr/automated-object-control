@@ -72,7 +72,7 @@ normNnModel x = nnModel (normalise x)
 -- The dataset is normalised, so directly goes to nnModel
 actionToTake : Index 3 -> Input -> Bool
 actionToTake i x = forall j . 
-    i != j => nnModel x ! i <= nnModel x ! j
+    i != j => nnModel x ! i >= nnModel x ! j
 
 
 

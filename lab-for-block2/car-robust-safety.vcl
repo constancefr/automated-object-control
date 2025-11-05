@@ -5,6 +5,7 @@
 --------------------------------------------------------------------------------
 -- Utilities
 eta = 0.01
+L = 0.01
 
 --------------------------------------------------------------------------------
 -- Inputs
@@ -80,7 +81,6 @@ smallerThanEta i x = forall j .
     i != j => nnModel x ! j <= eta
 
 
-
 --------------------------------------------------------------------------------
 -- Definition of safety robustness around an action
 
@@ -95,6 +95,12 @@ epsilon : Real
 boundedByEpsilon : UnnormalisedInput -> Bool
 boundedByEpsilon x = forall i . -epsilon <= x ! i  <= epsilon
 
+
+-- boundedByEpsilonEuclidean : UnnormalisedInput -> Bool
+-- boundedByEpsilonEuclidean x = forall i .
+    (x!i)*(x!i) <= eta*eta
+
+
 -- This will check the robust safety around the action point
 -- 
 robustSafetyAround : Input -> Label -> Bool
@@ -108,6 +114,19 @@ strongRobustSafetyAround x action = forall pertubation .
     let xPerturbed = x - pertubation in
     (boundedByEpsilon pertubation) and validInput (xPerturbed) =>
     smallerThanEta action xPerturbed
+
+-- lipschitzRobustSafetyAround : Input -> Label -> Bool
+-- lipschitzRobustSafetyAround x action = forall pertubation .
+--     let xPerturbed = x - pertubation in
+--     (boundedByEpsilon pertubation) and validInput (xPerturbed) =>
+--     -L <= (nnModel x ! i) - (nnModel xPerturbed ! ) <= L
+ 
+
+-- robustSafetyAroundEuclidean : Input -> Label -> Bool
+-- robustSafetyAroundEuclidean x action = forall pertubation .
+--     let xPerturbed = x - pertubation in
+--     (boundedByEpsilonEuclidean pertubation) and validInput (xPerturbed) =>
+--     actionToTake action xPerturbed
 
 --------------------------------------------------------------------------------
 -- Robustness with respect to a dataset
@@ -134,7 +153,15 @@ strongRobust : Vector Bool n
 strongRobust = foreach i . 
     strongRobustSafetyAround (trainingInputs ! i) (trainingLabels ! i)
 
+-- @property
+-- lipschitzRobust : Vector Bool n
+-- lipschitzRobust = foreach i . 
+--     lipschitzRobustSafetyAround (trainingInputs ! i) (trainingLabels ! i)
 
+-- @property
+-- robustEuclidean : Vector Bool n
+-- robustEuclidean = foreach i . 
+--     robustSafetyAroundEuclidean (trainingInputs ! i) (trainingLabels ! i)
 
 
 

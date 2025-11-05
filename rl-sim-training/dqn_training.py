@@ -83,21 +83,6 @@ def main():
         tensorboard_log=f"{trial_dir}/car_dqn/"
     )
 
-    # model = DQN(
-    #     "MlpPolicy",
-    #     env,
-    #     learning_rate=5e-4,
-    #     buffer_size=15000,
-    #     learning_starts=1000,
-    #     batch_size=64,
-    #     gamma=0.99,
-    #     train_freq=4,
-    #     gradient_steps=1,
-    #     target_update_interval=500,
-    #     policy_kwargs=dict(net_arch=[256, 256]),
-    #     verbose=0,
-    # )
-
     NUM_ROUNDS = 100
     NUM_TRAINING_STEPS_PER_ROUND = 5000
     NUM_TESTS_PER_ROUND = 100

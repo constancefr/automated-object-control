@@ -4,8 +4,10 @@
 
 --------------------------------------------------------------------------------
 -- Utilities
-eta = 0.01
 L = 0.01
+
+@parameter
+eta: Real
 
 --------------------------------------------------------------------------------
 -- Inputs
@@ -98,7 +100,7 @@ boundedByEpsilon x = forall i . -epsilon <= x ! i  <= epsilon
 
 -- boundedByEpsilonEuclidean : UnnormalisedInput -> Bool
 -- boundedByEpsilonEuclidean x = forall i .
-    (x!i)*(x!i) <= eta*eta
+    -- (x!i)*(x!i) <= eta*eta
 
 
 -- This will check the robust safety around the action point
@@ -162,7 +164,6 @@ strongRobust = foreach i .
 -- robustEuclidean : Vector Bool n
 -- robustEuclidean = foreach i . 
 --     robustSafetyAroundEuclidean (trainingInputs ! i) (trainingLabels ! i)
-
 
 
 

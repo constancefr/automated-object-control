@@ -110,7 +110,7 @@ safeFront x =
 safeBack : UnnormalisedInput -> Bool
 safeBack x = 
   x ! distanceToBackCar > L and
-  x ! distanceToFrontCar > L + (Vmin * Vmin)/(2 * Amax)
+  x ! distanceToBackCar > L + (Vmin * Vmin)/(2 * Amax)
 -- Non-linearly:
 --   x ! distanceToBackCar > L + (x ! velocityToBackCar * x ! velocityToBackCar)/(2 * Amax)
 

@@ -95,6 +95,7 @@ boundedByEpsilon x = forall i . -epsilon <= x ! i  <= epsilon
 
 Bmax = 5.0 -- magnitude
 Amax = 3.0
+Vmin = 0.0001
 Vmax = 20.0 -- ??
 L = 4.0 -- car length
 
@@ -109,7 +110,7 @@ safeFront x =
 safeBack : UnnormalisedInput -> Bool
 safeBack x = 
   x ! distanceToBackCar > L and
-  x ! distanceToFrontCar > L + (Vmax * Vmax)/(2 * Amax)
+  x ! distanceToFrontCar > L + (Vmin * Vmin)/(2 * Amax)
 -- Non-linearly:
 --   x ! distanceToBackCar > L + (x ! velocityToBackCar * x ! velocityToBackCar)/(2 * Amax)
 

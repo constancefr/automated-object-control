@@ -4,7 +4,7 @@
 
 --------------------------------------------------------------------------------
 -- Utilities
-L = 0.01
+Lip = 0.01
 
 @parameter
 eta: Real
@@ -121,7 +121,7 @@ strongRobustSafetyAround x action = forall pertubation .
 -- lipschitzRobustSafetyAround x action = forall pertubation .
 --     let xPerturbed = x - pertubation in
 --     (boundedByEpsilon pertubation) and validInput (xPerturbed) =>
---     -L <= (nnModel x ! i) - (nnModel xPerturbed ! ) <= L
+--     -Lip <= (nnModel x ! i) - (nnModel xPerturbed ! i) <= Lip
  
 
 -- robustSafetyAroundEuclidean : Input -> Label -> Bool

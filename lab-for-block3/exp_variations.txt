@@ -1,0 +1,12 @@
+#1 - baseline
+R0 = interval([100; 5; 30; 5; 0; 5], [101; 5.1; 31; 5.1; 1; 5.1]);
+
+#2 - larger R0 intervals
+R0 = interval([100; 5; 30; 5; 0; 5], [110; 6; 31; 6; 1; 6]);
+
+#3 - wider regions
+options_cont.timeStep = 0.05;
+
+#4 - collision unavoidable with back car
+action_next = 1; % always brake
+onnxFile = 'nn_model.onnx'; dt = 0.1; tFinal = 5; % longer sim

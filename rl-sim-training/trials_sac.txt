@@ -1,0 +1,27 @@
+TRIAL #1 ---
+Reward function:
+    a = 0.1
+    b = 1
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+
+Hyperparameters:
+    model = SAC(
+        "MlpPolicy",
+        env,
+        learning_rate=3e-4,
+        buffer_size=100_000,
+        batch_size=256,
+        gamma=0.99,
+        tau=0.02,
+        train_freq=1,
+        gradient_steps=1,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=1,
+        tensorboard_log=f"{trial_dir}/car_sac/"
+    )
+
+    NUM_ROUNDS = 100
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100
+

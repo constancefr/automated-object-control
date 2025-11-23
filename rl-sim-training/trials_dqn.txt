@@ -179,3 +179,52 @@ Reward function:
     NUM_ROUNDS = 100 ###
     NUM_TRAINING_STEPS_PER_ROUND = 5000
     NUM_TESTS_PER_ROUND = 100
+
+TRIAL #8 --- WITH RELATIVE DIST AND VELOCITY RATHER THAN ABSOLUTE!
+Reward function:
+    a = 0.1
+    b = 1 ###
+    reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=15000,
+        learning_starts=1000,
+        batch_size=32,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=1,
+        target_update_interval=50,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log=f"{trial_dir}/car_dqn/"
+    )
+    NUM_ROUNDS = 50
+    NUM_TRAINING_STEPS_PER_ROUND = 5000
+    NUM_TESTS_PER_ROUND = 100
+
+TRIAL #9 --- WITH RELATIVE DIST AND VELOCITY RATHER THAN ABSOLUTE!
+Same as #8, except for NUM_ROUNDS = 100
+
+TRIAL #10 --- same as #9, excep for b = 10
+
+TRIAL #11 --- same as #9 with hyperparam tweaks:
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=1e-4,
+        buffer_size=50_000,
+        learning_starts=1000,
+        batch_size=64,
+        gamma=0.99,
+        train_freq=4,
+        gradient_steps=1,
+        target_update_interval=1000,
+        exploration_fraction=0.4,
+        exploration_final_eps=0.05,
+        policy_kwargs=dict(net_arch=[256, 256]),
+        verbose=0,
+        tensorboard_log=f"{trial_dir}/car_dqn/"
+    )

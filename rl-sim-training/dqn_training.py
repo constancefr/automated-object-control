@@ -7,8 +7,8 @@ from stable_baselines3 import DQN
 import torch
 import os
 
-trial_round = 6
-trial_dir = f"results/trial_{trial_round}"
+trial_round = 1
+trial_dir = f"results_dqn/trial_{trial_round}"
 
 def test_model(env, model, video_writer=None, msg=None):
     '''
@@ -70,14 +70,16 @@ def main():
     model = DQN(
         "MlpPolicy",
         env,
-        learning_rate=5e-4,
-        buffer_size=15000,
+        learning_rate=1e-4,
+        buffer_size=50_000,
         learning_starts=1000,
-        batch_size=32,
+        batch_size=64,
         gamma=0.99,
         train_freq=4,
         gradient_steps=1,
-        target_update_interval=50,
+        target_update_interval=1000,
+        exploration_fraction=0.4,
+        exploration_final_eps=0.05,
         policy_kwargs=dict(net_arch=[256, 256]),
         verbose=0,
         tensorboard_log=f"{trial_dir}/car_dqn/"

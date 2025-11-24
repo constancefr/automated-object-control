@@ -6,8 +6,12 @@ acc_dqn_*.zip
 acc_dqn_checkpoints/
 *.err
 *.out
+results_dqn/
+results_sac/
 results/
+acc_abs.py
 query_cache/
+sac_trial/
 *.vclo
 
 # Created by https://www.toptal.com/developers/gitignore/api/python

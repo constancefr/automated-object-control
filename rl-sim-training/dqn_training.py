@@ -7,8 +7,8 @@ from stable_baselines3 import DQN
 import torch
 import os
 
-trial_round = 6
-trial_dir = f"results/trial_{trial_round}"
+trial_round = 12
+trial_dir = f"results_dqn/trial_{trial_round}"
 
 def test_model(env, model, video_writer=None, msg=None):
     '''

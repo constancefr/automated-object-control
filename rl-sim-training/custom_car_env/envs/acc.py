@@ -9,15 +9,11 @@ TODO:
 - check if initialisation is valid (proper distance between cars and to boundaries)
 '''
 
-import logging
-import math
 import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.utils import seeding
 import numpy as np
-import random
 import pygame
-from pygame import gfxdraw
 import os
 
 class ACCEnv(gym.Env):
@@ -52,11 +48,11 @@ class ACCEnv(gym.Env):
         # Maximal velocity
         self.Vmax = 20.0
 
-        # Action Space: Choose Acceleration self.A, 0 or self.B
-        # self.action_space = spaces.Discrete(3)
+        # Action Space: continuous acceleration command in [-1, 1].
+        # The environment will rescale this to the physical acceleration range using Amax and Bmax
         self.action_space = spaces.Box(
-            low=np.array([-self.Bmax], dtype=np.float32),
-            high=np.array([self.Amax], dtype=np.float32),
+            low=np.array([-1.0], dtype=np.float32),
+            high=np.array([1.0], dtype=np.float32),
             dtype=np.float32
         )
 
@@ -163,8 +159,17 @@ class ACCEnv(gym.Env):
 
     def step(self, action):
         self.current_step += 1
-        acc = float(np.clip(action, self.action_space.low, self.action_space.high)[0]) # clip action to bounds
 
+        # Rescale SAC output actions [-1, 1] to asymmetric physical bounds
+        raw_action = float(np.clip(action, -1.0, 1.0)[0])
+
+        if raw_action >= 0.0:
+            # Forward acceleration up to Amax
+            acc = raw_action * self.Amax
+        else:
+            # Braking up to -Bmax
+            acc = raw_action * self.Bmax
+        
         # FRONT CAR ---
         ego_pos, ego_vel, front_pos, front_vel, rel_front_dist, rel_front_vel = self.state
         front_action = self.update_front_action()
@@ -187,19 +192,35 @@ class ACCEnv(gym.Env):
         )
         # -------------
 
-        # Assigning reward    
+        # Assigning reward
         crash = self.is_crash()
-        terminated = crash
         truncated = self.current_step >= self.max_steps
 
-        # Reward function taken from highway-env guidelines and kept simple.
-        # Encourages high speed while avoiding collision.
-        a = 0.1
-        b = 1
-        reward = a * (ego_vel_new / self.Vmax) - b * crash
+        if crash:
+            reward = -20.0
+            terminated = True
+        else:
+            terminated = False
+            
+            tau = 1.0 # seconds - how far behind the ego should stay
+            d_min = 5.0 # minimal headway in metres
+            desired_rel_dist = ego_vel_new * tau + d_min
 
-        if self.invert_loss:
-            reward *= -1.0
+            distance_error = rel_front_dist_new - desired_rel_dist
+            closing_speed = ego_vel_new - front_vel_new
+
+            reward = - (distance_error**2 + 0.1 * closing_speed**2)
+
+            reward = np.clip(reward, -10.0, 0.0)
+
+        # # Reward function taken from highway-env guidelines and kept simple.
+        # # Encourages high speed while avoiding collision.
+        # a = 0.1
+        # b = 1
+        # reward = a * (ego_vel_new / self.Vmax) - b * crash
+
+        # if self.invert_loss:
+        #     reward *= -1.0
 
         info = {
             'crash': crash,

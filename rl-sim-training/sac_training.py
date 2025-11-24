@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback
+from gymnasium.wrappers import NormalizeObservation, NormalizeReward, TimeLimit
+import torch
+
 
 # ==============================================
 # Logging callback to store reward + episode length
@@ -24,93 +27,94 @@ class EpisodeStatsCallback(BaseCallback):
 
 
 # ==============================================
-# Plot helper
+# Training & Plotting
 # ==============================================
-def plot_training(round_rewards, round_lengths, out_dir):
-    plt.figure(figsize=(12, 5))
+def plot_training(avg_rewards, avg_ep_lengths, save_dir):
+    plt.figure(figsize=(12,5))
 
-    # Reward
-    plt.subplot(1, 2, 1)
-    plt.plot(round_rewards, label="Avg episodic reward")
-    plt.xlabel("Training round")
-    plt.ylabel("Reward")
+    plt.subplot(1,2,1)
+    plt.plot(avg_rewards, label="Avg reward")
+    plt.xlabel("Round")
+    plt.ylabel("Average Reward")
     plt.grid(True)
 
-    # Episode length
-    plt.subplot(1, 2, 2)
-    plt.plot(round_lengths, label="Avg episode length")
-    plt.xlabel("Training round")
-    plt.ylabel("Length")
+    plt.subplot(1,2,2)
+    plt.plot(avg_ep_lengths, label="Avg length")
+    plt.xlabel("Round")
+    plt.ylabel("Average Episode Length")
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "training_plots.png"))
+    plt.savefig(os.path.join(save_dir, "training_plot.png"))
     plt.close()
 
 
 # ==============================================
-# Main training loop
+# Training Script
 # ==============================================
 if __name__ == "__main__":
 
-    # Output directory for all training runs
-    TRIAL_DIR = "./results_sac"
+    # Create directories
+    TRIAL_DIR = "./sac_trial"
     os.makedirs(TRIAL_DIR, exist_ok=True)
+    os.makedirs(os.path.join(TRIAL_DIR, "sac_models"), exist_ok=True)
 
-    # Create monitored environment
-    env = gym.make("custom_car_env:custom_car_env/acc-continuous-v0", render_mode=None)
+    # Create wrapped environment (minimal structural changes)
+    env = gym.make("custom_car_env:custom_car_env/acc-continuous-v0", render_mode="rgb_array")
+
+
+    # --- added normalization wrappers ---
+    env = TimeLimit(env, max_episode_steps=2000)
+    env = NormalizeObservation(env)
+    env = NormalizeReward(env)
+    # -------------------------------------
 
     env = Monitor(env)
 
-    # SAC model
+    # Improve SAC hyperparameters (minimal patch)
     model = SAC(
         "MlpPolicy",
         env,
-        learning_rate=3e-4,
-        buffer_size=200_000,
-        batch_size=256,
+        learning_rate=1e-4,                # lower LR => more stable critics
+        buffer_size=300_000,               # larger replay for stiff dynamics
+        batch_size=128,                    # smaller batch => smoother updates
+        train_freq=64,                     # frequent small updates
+        gradient_steps=64,                 # match train_freq
         gamma=0.99,
-        tau=0.02,
-        train_freq=1,
-        gradient_steps=1,
-        policy_kwargs=dict(net_arch=[256, 256]),
+        tau=0.005,
+        ent_coef="auto",
+        target_entropy="auto",
+        learning_starts=5000,              # let buffer fill before learning
+        use_sde=False,
+        policy_kwargs=dict(
+            net_arch=[256, 256],
+            activation_fn=torch.nn.ReLU,
+        ),
         verbose=1,
-        tensorboard_log=os.path.join(TRIAL_DIR, "tb_logs")
     )
 
-    # Training settings
-    NUM_ROUNDS = 80
-    # STEPS_PER_ROUND = 10_000
-    STEPS_PER_ROUND = 5_000
+    # Logging callback
+    callback = EpisodeStatsCallback()
+
+    # Training rounds
+    NUM_ROUNDS = 20
+    STEPS_PER_ROUND = 50_000
 
     round_avg_rewards = []
     round_avg_ep_lengths = []
 
-    stats_callback = EpisodeStatsCallback()
-
-    # Training rounds
     for r in range(NUM_ROUNDS):
-
         print(f"\n=== Round {r+1}/{NUM_ROUNDS} ===")
 
-        # Reset callback stats
-        stats_callback.ep_rewards.clear()
-        stats_callback.ep_lengths.clear()
+        callback.ep_rewards.clear()
+        callback.ep_lengths.clear()
 
-        # Train
-        model.learn(
-            total_timesteps=STEPS_PER_ROUND,
-            reset_num_timesteps=False,
-            callback=stats_callback,
-        )
+        # Train for one round
+        model.learn(total_timesteps=STEPS_PER_ROUND, reset_num_timesteps=False, callback=callback)
 
-        # Compute stats
-        if len(stats_callback.ep_rewards) > 0:
-            avg_r = np.mean(stats_callback.ep_rewards)
-            avg_len = np.mean(stats_callback.ep_lengths)
-        else:
-            avg_r = 0.0
-            avg_len = 0.0
+        # Aggregate statistics
+        avg_r = np.mean(callback.ep_rewards[-50:]) if len(callback.ep_rewards) > 0 else 0
+        avg_len = np.mean(callback.ep_lengths[-50:]) if len(callback.ep_lengths) > 0 else 0
 
         round_avg_rewards.append(avg_r)
         round_avg_ep_lengths.append(avg_len)
@@ -119,7 +123,7 @@ if __name__ == "__main__":
         print(f"  Avg episode length: {avg_len:.1f}")
 
         # Save model
-        model.save(os.path.join(TRIAL_DIR, f"sac_round_{r+1}"))
+        model.save(os.path.join(TRIAL_DIR, f"sac_models/sac_round_{r+1}"))
 
         # Plot so far
         plot_training(round_avg_rewards, round_avg_ep_lengths, TRIAL_DIR)

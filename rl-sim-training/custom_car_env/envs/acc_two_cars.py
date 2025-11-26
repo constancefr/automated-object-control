@@ -48,13 +48,13 @@ class ACCEnv(gym.Env):
         # Maximal velocity
         self.Vmax = 20.0
         
-        bound = np.array([np.finfo(np.float32).max,np.finfo(np.float32).max,np.finfo(np.float32).max,np.finfo(np.float32).max])
+        bound = np.array([np.finfo(np.float32).max,np.finfo(np.float32).max])
 
         # Action Space: Choose Acceleration self.A, 0 or self.B
         self.action_space = spaces.Discrete(3)
 
-        # obs = [rel_front_dist, rel_front_vel, rel_back_dist, rel_back_vel]
-        self.observation_space = spaces.Box(-bound, bound, shape=(4,))
+        # State Space: (position, velocity)
+        self.observation_space = spaces.Box(-bound, bound)
 
         self._seed()
         self.state = None
@@ -69,88 +69,53 @@ class ACCEnv(gym.Env):
         }
         self.invert_loss = False
 
-        # OTHER CARS ---
+        # FRONT CAR ---
         self.last_front_action = 1 # idle default
-        self.last_back_action = 1
 
         # to access action in render()
         self.ego_action = 1 # default idle
         self.front_action = 1
-        self.back_action = 1
 
     def _seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
-    
-    #  self.state = (
-    #         np.float32(ego_pos_new), np.float32(ego_vel_new),
-    #         np.float32(front_pos_new), np.float32(front_vel_new),
-    #         np.float32(back_pos_new), np.float32(back_vel_new),
-    #         np.float32(rel_front_dist_new), np.float32(rel_front_vel_new),
-    #         np.float32(rel_back_dist_new), np.float32(rel_back_vel_new)
-    #     )
 
     def is_crash(self):
-        rel_front_dist = self.state[6]
-        rel_back_dist = self.state[8]
-        # ego_pos, _, front_pos, _, back_pos, _, _, _, _, _ = self.state
-        crash_front = abs(rel_front_dist) <= self.REL_CAR_LENGTH
-        crash_back  = abs(rel_back_dist)  <= self.REL_CAR_LENGTH
-        return crash_front or crash_back
+        ego_pos, _, front_pos, _, _, _ = self.state
+        crash = (abs(ego_pos-front_pos) <= self.REL_CAR_LENGTH)
+        return crash
     
-    def update_other_action(self, prefix):
+    def update_front_action(self):
         '''
-        Stochastic behaviour model for the front and back cars.
         Mostly cruising at high speed with occasional braking.
         '''
-        behaviour_attr = f"{prefix}_behaviour"
-        timer_attr = f"{prefix}_timer"
-        emerg_attr = f"{prefix}_emergency_brake_active"
-        action_attr = f"{prefix}_action"
-        last_action_attr = f"last_{prefix}_action"
+        if not hasattr(self, "front_behaviour"):
+            self.front_behaviour = "cruise"
+            self.front_timer = 0
+            self.emergency_brake_active = False
 
-        # Initialise
-        if not hasattr(self, behaviour_attr):
-            setattr(self, behaviour_attr, "cruise")
-            setattr(self, timer_attr, 0)
-            setattr(self, emerg_attr, False)
-
-        behaviour = getattr(self, behaviour_attr)
-        timer = getattr(self, timer_attr)
-
-        timer += 1
-        setattr(self, timer_attr, timer)
-
-        # Stochastic behaviour
-        if timer > self.np_random.integers(20, 40):
-            behaviour = self.np_random.choice(
+        self.front_timer += 1
+        if self.front_timer > self.np_random.integers(20, 40):
+            self.front_behaviour = self.np_random.choice(
                 ["cruise", "accelerate", "brake", "emergency_brake"],
-                p=[0.50, 0.40, 0.10, 0.00]
+                p=[0.50, 0.40, 0.10, 0.00]  # 50% cruise, 40% accelerate, 10% brake
             )
-            setattr(self, behaviour_attr, behaviour)
-            setattr(self, timer_attr, 0)
+            self.front_timer = 0
+            
+            if self.front_behaviour == "emergency_brake":
+                self.emergency_brake_active = True
 
-            if behaviour == "emergency_brake":
-                setattr(self, emerg_attr, True)
+        if self.front_behaviour == "accelerate":
+            self.front_action = 0
+        elif self.front_behaviour == "brake":
+            self.front_action = 2
+        elif self.front_behaviour == "emergency_brake":
+            self.front_action = 2
+        else:  # idle
+            self.front_action = 1
 
-        if behaviour == "accelerate":
-            action = 0
-        elif behaviour == "brake":
-            action = 2
-        elif behaviour == "emergency_brake":
-            action = 2
-        else:  # cruise/idle
-            action = 1
-
-        # # FOR DEBUGGING --------
-        # action = 0
-        # # ----------------------
-
-        setattr(self, action_attr, action)
-        setattr(self, last_action_attr, action)
-
-        return action
-
+        self.last_front_action = self.front_action
+        return self.front_action
     
     def update_front_state(self, ego_pos, ego_vel, front_pos, front_vel, front_action):
         '''
@@ -180,51 +145,11 @@ class ACCEnv(gym.Env):
 
         rel_front_dist_new = ego_pos - front_pos_new
         rel_front_vel_new = ego_vel - front_vel_new
-        
+
         self.state = (
-            self.state[0], self.state[1],
+            np.float32(ego_pos), np.float32(ego_vel),
             np.float32(front_pos_new), np.float32(front_vel_new),
-            self.state[4], self.state[5],
-            np.float32(rel_front_dist_new), np.float32(rel_front_vel_new),
-            self.state[8], self.state[9],
-        )
-        
-    def update_back_state(self, ego_pos, ego_vel, back_pos, back_vel, back_action):
-        """
-        Back car kinematics, keeps conservative spacing w.r.t. front car so ego can fit.
-        """
-        if back_action == 0:              # accelerate
-            acc = self.Amax * self.np_random.uniform(0.1, 1.0)
-        elif back_action == 1:            # idle
-            acc = 0.0
-        elif back_action == 2:            # brake
-            if getattr(self, "rear_behaviour", None) == "emergency_brake":
-                acc = -self.Bmax
-            else:
-                acc = -self.np_random.uniform(self.Bmin, self.Bmax)
-        else:
-            raise ValueError(f"Unknown action value {back_action}")
-
-        # allow enougn space for ego (conservative)
-        front_pos = self.state[2]
-        back_pos  = self.state[4]
-        front_back_gap = front_pos - back_pos
-        if front_back_gap < 2*self.CAR_LENGTH:
-            acc = -self.Bmax
-
-        t = self.TIME_STEP
-        back_vel_new = np.clip(back_vel + acc * t, 0, self.Vmax)
-        back_pos_new = back_pos + back_vel * t + 0.5 * acc * t * t
-
-        rel_back_dist_new = back_pos_new - ego_pos
-        rel_back_vel_new  = back_vel_new - ego_vel
-
-        self.state = (
-            self.state[0], self.state[1],
-            self.state[2], self.state[3],
-            np.float32(back_pos_new), np.float32(back_vel_new),
-            self.state[6], self.state[7],
-            np.float32(rel_back_dist_new), np.float32(rel_back_vel_new)
+            np.float32(rel_front_dist_new), np.float32(rel_front_vel_new)
         )
 
     def step(self, action):
@@ -240,18 +165,11 @@ class ACCEnv(gym.Env):
         #     # Braking up to -Bmax
         #     acc = raw_action * self.Bmax
         
-        # OTHER CARS ---
-        ego_pos, ego_vel, front_pos, front_vel, back_pos, back_vel, _, _, _, _ = self.state
-        front_action = self.update_other_action("front")
-        back_action = self.update_other_action("back")
+        # FRONT CAR ---
+        ego_pos, ego_vel, front_pos, front_vel, _, _ = self.state
+        front_action = self.update_front_action()
         self.update_front_state(ego_pos, ego_vel, front_pos, front_vel, front_action)
-        self.update_back_state(ego_pos, ego_vel, back_pos, back_vel, back_action)
-
-        ego_pos, ego_vel = self.state[0], self.state[1]
-        front_pos_new, front_vel_new = self.state[2], self.state[3]
-        back_pos_new, back_vel_new = self.state[4], self.state[5]
-        rel_front_dist_new, rel_front_vel_new = self.state[6], self.state[7]
-        rel_back_dist_new, rel_back_vel_new = self.state[8], self.state[9]
+        ego_pos, ego_vel, front_pos_new, front_vel_new, rel_front_dist_new, rel_front_vel_new = self.state
         # -------------
         
         # EGO CAR -----
@@ -282,9 +200,7 @@ class ACCEnv(gym.Env):
         self.state = (
             np.float32(ego_pos_new), np.float32(ego_vel_new),
             np.float32(front_pos_new), np.float32(front_vel_new),
-            np.float32(back_pos_new), np.float32(back_vel_new),
-            np.float32(rel_front_dist_new), np.float32(rel_front_vel_new),
-            np.float32(rel_back_dist_new), np.float32(rel_back_vel_new)
+            np.float32(rel_front_dist_new), np.float32(rel_front_vel_new)
         )
         # -------------
 
@@ -309,16 +225,14 @@ class ACCEnv(gym.Env):
 
         # Provide RELATIVE metrics as observation to make infinite-time horizon manageable!
         observation = np.array([
-            rel_front_dist_new, rel_front_vel_new,
-            rel_back_dist_new, rel_back_vel_new
+            rel_front_dist_new,
+            rel_front_vel_new
         ], dtype=np.float32)
 
         return observation, reward, terminated, truncated, info
     
     def reset(self, seed=None, options=None):
         '''
-        TODO: change docstring to include back car safety!!
-
         Safety constraints at initialisation:
         - min distance of L between cars
         - min dist of L between cars if both were to brake (front at max brake, ego at current brake)
@@ -355,29 +269,23 @@ class ACCEnv(gym.Env):
         ego_vel = self.np_random.uniform(low=0,high=self.Vmax, size=(1,))[0]
         # self.ego_state = (np.float32(ego_pos), np.float32(ego_vel))
 
-        # 3: randomly set front_vel v_f and back_vel v_b (positive, up to max V)
+        # 3: randomly set front_vel v_o (positive, up to max V)
         front_vel = self.np_random.uniform(low=0,high=self.Vmax, size=(1,))[0]
-        back_vel = self.np_random.uniform(low=0,high=self.Vmax, size=(1,))[0]
 
         # 4: set front_pos x_o s.t. x_o > x_e - (v_e^2 / 2*B_min) + (v_o^2 / 2*B_max) + L
         min_front_pos = ego_pos - (ego_vel**2 / 2*(self.Bmin)) + (front_vel**2 / 2*(self.Bmax)) + self.REL_CAR_LENGTH
+        # NOTE: check maths here because min_front_pos is often negative
+        # TODO make bmin and bmax negative??
         eps = 0.00001
         min_front_pos = max(min_front_pos+eps, ego_pos + self.REL_CAR_LENGTH)
         front_pos = self.np_random.uniform(low=min_front_pos,high=min_front_pos + self.MAX_VALUE/2, size=(1,))[0] # max is somewhat arbitrary
         rel_front_dist = ego_pos - front_pos
         rel_front_vel = ego_vel - front_vel
 
-        # back car behind ego - somewhat arbitrary but conservative
-        back_pos = ego_pos - self.REL_CAR_LENGTH - self.np_random.uniform(5, 15)
-        rel_back_dist = back_pos - ego_pos
-        rel_back_vel = back_vel - ego_vel
-
         self.state = (
             ego_pos, ego_vel,
             front_pos, front_vel,
-            back_pos, back_vel,
-            rel_front_dist, rel_front_vel,
-            rel_back_dist, rel_back_vel
+            rel_front_dist, rel_front_vel
         )
         
         info = {
@@ -386,8 +294,8 @@ class ACCEnv(gym.Env):
         }
 
         observation = np.array([
-            rel_front_dist, rel_front_vel,
-            rel_back_dist, rel_back_vel
+            rel_front_dist,
+            rel_front_vel
         ], dtype=np.float32)
 
         return observation, info
@@ -408,8 +316,7 @@ class ACCEnv(gym.Env):
         screen_height = self.SCREEN_HEIGHT
 
         ego_pos, ego_vel = self.state[0], self.state[1]
-        front_pos = self.state[2]
-        back_pos = self.state[4]
+        front_pos, front_vel = self.state[2], self.state[3]
 
         camera_centre_world = ego_pos # camera follows ego car
         # camera_centre_world = front_pos # camera follows front car
@@ -418,7 +325,7 @@ class ACCEnv(gym.Env):
         # Convert world coords to screen coords
         def world_to_screen(world_x):
             relative_to_camera = world_x - camera_centre_world
-            screen_centre = screen_width * 0.50 # place ego car in the centre
+            screen_centre = screen_width * 0.25
             return screen_centre + (relative_to_camera / world_view_width) * screen_width
         
         scroll_base = ego_vel * 2.0
@@ -455,14 +362,12 @@ class ACCEnv(gym.Env):
 
             self.nn_cart = pygame.image.load("nn-car.png").convert_alpha()
             self.front_cart = pygame.image.load("other-car.png").convert_alpha()
-            self.back_cart = pygame.image.load("other-car.png").convert_alpha()
             original_width, original_height = self.nn_cart.get_size()
 
             scale_factor = cart_pix_width / original_width
             new_height = int(original_height * scale_factor)
             self.nn_cart = pygame.transform.flip(pygame.transform.smoothscale(self.nn_cart, (int(cart_pix_width), new_height)),False,True)
             self.front_car = pygame.transform.flip(pygame.transform.smoothscale(self.front_cart, (int(cart_pix_width), new_height)),False,True)
-            self.back_car = pygame.transform.flip(pygame.transform.smoothscale(self.back_cart, (int(cart_pix_width), new_height)),False,True)
 
             self.pole_positions = [x for x in range(0, screen_width + pole_spacing, pole_spacing)]
             self.cloud_positions = [(x, 300 + 50 * (i % 2)) for i, x in enumerate(range(0, screen_width + cloud_spacing, cloud_spacing))]
@@ -506,31 +411,25 @@ class ACCEnv(gym.Env):
         # Convert world positions to screen positions
         ego_x = world_to_screen(ego_pos)
         front_x = world_to_screen(front_pos)
-        back_x = world_to_screen(back_pos)
+        # front_x_centre = screen_width * 0.75
+        # ego_x = front_x_centre + (ego_pos - front_pos) * x_scale
+        # front_x = front_x_centre
                    
         # Converting centre to upper-left for blit (so image is centered)
         half_w = cart_pix_width / 2.0
-        
-        # Add ego car
+        # Add a follower cart
         l,r = -half_w, 0.0
         t,b = cart_pix_height, 0.0
         l += ego_x
         b += carty*0.25
         self.surf.blit(self.nn_cart, (l,b)) # (l,b) is upper-left corner
 
-        # Add front cart
+        # Add leader cart
         l,r = -half_w, 0.0
         t,b = cart_pix_height, 0.0
         l += front_x
         b += carty*0.25
         self.surf.blit(self.front_car, (l,b))
-
-        # Add back car
-        l,r = -half_w, 0.0
-        t,b = cart_pix_height, 0.0
-        l+= back_x
-        b+= carty*0.25
-        self.surf.blit(self.back_car, (l,b))
 
         stripe_color = (228, 228, 228)  # Yellow stripe
         for x in self.stripe_positions:
@@ -559,13 +458,6 @@ class ACCEnv(gym.Env):
         elif self.front_action == 2: # break
             front_colour = red
 
-        if self.back_action == 0: # accelerate
-            back_colour = green
-        elif self.back_action == 1: # idle
-            back_colour = yellow
-        elif self.back_action == 2: # break
-            back_colour = red
-
         pygame.draw.circle(
             self.surf, 
             ego_colour, 
@@ -575,11 +467,6 @@ class ACCEnv(gym.Env):
             self.surf, 
             front_colour, 
             (screen_width-50, screen_height-50),
-            20)
-        pygame.draw.circle(
-            self.surf, 
-            back_colour, 
-            (screen_width-150, screen_height-50),
             20)
 
         rgb_surface = pygame.transform.flip(self.surf, False, True)

@@ -70,16 +70,16 @@ def main():
     model = DQN(
         "MlpPolicy",
         env,
-        learning_rate=5e-4,
-        buffer_size=15000,
+        learning_rate=1e-3,
+        buffer_size=50_000,
         learning_starts=1000,
-        batch_size=32,
+        batch_size=64,
         gamma=0.99,
         train_freq=4,
         gradient_steps=1,
-        target_update_interval=50,
+        target_update_interval=1_000,
         policy_kwargs=dict(net_arch=[256, 256]),
-        verbose=0,
+        verbose=1,
         tensorboard_log=f"{trial_dir}/car_dqn/"
     )
 
@@ -106,8 +106,8 @@ def main():
         # Create video writer for first test episode of recorded rounds
         video_writer = None
         if rnd % VIDEO_INTERVAL == 0:
-            fourcc = cv2.VideoWriter.fourcc(*'avc1')
-            # fourcc = cv2.VideoWriter.fourcc('m','p','4','v') # for some reason this doesn't work
+            #fourcc = cv2.VideoWriter.fourcc(*'avc1')
+            fourcc = cv2.VideoWriter.fourcc(*'mp4v') # for some reason this doesn't work
             video_path = os.path.join(VIDEO_DIR, f"training_round_{rnd:03d}.mp4")
             video_writer = cv2.VideoWriter(video_path, fourcc, FPS, (width, height))
             print(f"Recording video: {video_path}")

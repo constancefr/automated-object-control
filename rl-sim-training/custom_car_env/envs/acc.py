@@ -287,9 +287,27 @@ class ACCEnv(gym.Env):
 
         # # Reward function taken from highway-env guidelines and kept simple.
         # # Encourages high speed while avoiding collision.
-        a = 0.1
-        b = 1
-        reward = a * (ego_vel_new / self.Vmax) - b * crash
+        front_gap = max(0.0, -rel_front_dist_new) # distance from ego to front
+        back_gap = max(0.0, -rel_back_dist_new) # distance from back to ego
+
+        desired_gap = self.MIN_SEPARATION
+        speed_term = ego_vel_new / self.Vmax
+
+        def gap_penalty(gap):
+            if gap < desired_gap:
+                return (desired_gap - gap) / max(desired_gap, 1e-6)
+            return 0.0
+
+        front_penalty = gap_penalty(front_gap)
+        back_penalty = gap_penalty(back_gap)
+
+        reward = 0.1
+
+        crash_penalty = 50 if crash else 0.0
+
+        reward = 0.05 * speed_term
+        reward -= 1.0 * (front_penalty + back_penalty)
+        reward -= crash_penalty
 
         if self.invert_loss:
             reward *= -1.0
@@ -516,21 +534,21 @@ class ACCEnv(gym.Env):
         t,b = cart_pix_height, 0.0
         l += ego_x
         b += carty*0.25
-        self.surf.blit(self.nn_cart, (l,b)) # (l,b) is upper-left corner
+        self.surf.blit(self.nn_cart, (int(l), int(b))) # (l,b) is upper-left corner
 
         # Add front cart
         l,r = -half_w, 0.0
         t,b = cart_pix_height, 0.0
         l += front_x
         b += carty*0.25
-        self.surf.blit(self.front_car, (l,b))
+        self.surf.blit(self.front_car, (int(l), int(b)))
 
         # Add back car
         l,r = -half_w, 0.0
         t,b = cart_pix_height, 0.0
         l+= back_x
         b+= carty*0.25
-        self.surf.blit(self.back_car, (l,b))
+        self.surf.blit(self.back_car, (int(l), int(b)))
 
         stripe_color = (228, 228, 228)  # Yellow stripe
         for x in self.stripe_positions:

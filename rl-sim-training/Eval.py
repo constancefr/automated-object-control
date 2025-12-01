@@ -55,7 +55,7 @@ def evaluate_model(env_id: str, model_path: str, n_episodes: int, render: bool =
                 crashed = True
 
             if render:
-                _ = env.render()  # ignore frame; just show animation if using human/rgb_array + external viewer
+                _ = env.render()
 
         ep_lengths.append(steps)
         ep_rewards.append(total_reward)

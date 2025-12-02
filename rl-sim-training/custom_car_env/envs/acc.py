@@ -280,50 +280,61 @@ class ACCEnv(gym.Env):
             np.float32(rel_back_dist_new), np.float32(rel_back_vel_new)
         )
         # -------------
-
         # Assigning reward
         crash = self.is_crash()
         terminated = crash
         truncated = self.current_step >= self.max_steps
 
-        # --- SAFER, CLIPPED REWARD ---
+        # Distances to front/back (always >= 0)
+        front_gap = max(0.0, -rel_front_dist_new)  # distance from ego to front car
+        back_gap = max(0.0, -rel_back_dist_new)  # distance from back car to ego
 
-        # Distances in front and back (always >= 0)
-        front_gap = max(0.0, -rel_front_dist_new)   # ego -> front
-        back_gap  = max(0.0, -rel_back_dist_new)    # back -> ego
-
+        # Desired safety gaps
         desired_front_gap = self.MIN_SEPARATION
-        desired_back_gap  = self.MIN_SEPARATION
+        desired_back_gap = self.MIN_SEPARATION
 
-        # Normalised gap error: 0 at desired gap
-        gap_front_error = (front_gap - desired_front_gap) / max(desired_front_gap, 1e-6)
+        # --- 1) Headway term (front gap) ---
+        front_gap_error = (front_gap - desired_front_gap) / max(desired_front_gap, 1e-6)
+        front_gap_error = np.clip(front_gap_error, -1.0, 1.0)
+        r_headway = 1.0 - (front_gap_error ** 2)  # in [0, 1]
 
-        # Split into "too close" and "too far", with clipping
-        too_close = np.clip(-gap_front_error, 0.0, 1.0)  # 0..1
-        too_far   = np.clip(gap_front_error, 0.0, 1.0)   # 0..1
+        # --- 2) Relative speed term (speed matching) ---
+        rel_speed_norm = rel_front_vel_new / max(self.Vmax, 1e-6)
+        rel_speed_norm = np.clip(rel_speed_norm, -1.0, 1.0)
+        r_speed = 1.0 - (rel_speed_norm ** 2)  # in [0, 1]
 
-        # Penalise too close much more than too far, but keep bounded
-        gap_front_penalty = 2.0 * too_close + 0.2 * too_far
+        # --- 3) Back car safety term ---
+        back_safety_ratio = back_gap / max(desired_back_gap, 1e-6)
+        back_safety_ratio = np.clip(back_safety_ratio, 0.0, 1.0)
+        r_back = back_safety_ratio  # in [0, 1]
 
-        # Relative speed error: rel_front_vel_new = ego_vel - front_vel
-        rel_speed_error = rel_front_vel_new / max(self.Vmax, 1e-6)
-        # Squared, but clipped so it can't blow up if speeds diverge badly
-        rel_speed_penalty = 0.5 * np.clip(rel_speed_error ** 2, 0.0, 1.0)
+        # --- Combine into a single score in [0, 1] ---
+        w_headway = 0.5
+        w_speed = 0.3
+        w_back = 0.2
 
-        # Back car: penalty only if too close, and bounded
-        if back_gap < desired_back_gap:
-            back_error = (desired_back_gap - back_gap) / max(desired_back_gap, 1e-6)
-            back_penalty = np.clip(back_error ** 2, 0.0, 1.0)
-        else:
-            back_penalty = 0.0
+        base_score = (
+                w_headway * r_headway +
+                w_speed * r_speed +
+                w_back * r_back
+        )  # in [0, 1]
 
-        # Crash penalty: big, but now meaningful relative to per-step penalties
-        crash_penalty = 300.0 if crash else 0.0
+        # Map [0, 1] -> [-1, 1]
+        dense_term = 0.02*(base_score-0.5)
 
-        # Small living bonus
-        reward = 0.1
-        reward -= (gap_front_penalty + rel_speed_penalty + back_penalty)
-        reward -= crash_penalty
+        # Survival bonus: explicitly reward being alive longer
+        survival_bonus = 0.01
+        reward = dense_term + survival_bonus
+
+        danger_gap = self.REL_CAR_LENGTH
+
+        if front_gap < danger_gap:
+            frac = 1.0 - front_gap / max(danger_gap, 1e-6)
+            reward -= 0.5 * np.clip(frac, 0.0, 1.0)
+        # Crash penalty: clearly worse than any non-crash trajectory,
+        # but not huge (keeps DQN targets stable).
+        if crash:
+            reward = -3.0
 
         if self.invert_loss:
             reward *= -1.0

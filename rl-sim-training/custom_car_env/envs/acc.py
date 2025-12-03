@@ -116,7 +116,7 @@ class ACCEnv(gym.Env):
         setattr(self, timer_attr, timer)
 
         # Stochastic behaviour
-        if timer > self.np_random.integers(20, 40):
+        if timer > self.np_random.integers(80, 120):
             behaviour = self.np_random.choice(
                 ["cruise", "accelerate", "brake", "emergency_brake"],
                 p=[0.50, 0.40, 0.10, 0.00]
@@ -191,7 +191,7 @@ class ACCEnv(gym.Env):
         elif back_action == 1:  # idle
             acc = 0.0
         elif back_action == 2:  # brake
-            if getattr(self, "rear_behaviour", None) == "emergency_brake":
+            if getattr(self, "back_behaviour", None) == "emergency_brake":
                 acc = -self.Bmax
             else:
                 acc = -self.np_random.uniform(self.Bmin, self.Bmax)
@@ -223,31 +223,21 @@ class ACCEnv(gym.Env):
     def step(self, action):
         self.current_step += 1
 
-        # # Rescale SAC output actions [-1, 1] to asymmetric physical bounds
-        # raw_action = float(np.clip(action, -1.0, 1.0)[0])
-
-        # if raw_action >= 0.0:
-        #     # Forward acceleration up to Amax
-        #     acc = raw_action * self.Amax
-        # else:
-        #     # Braking up to -Bmax
-        #     acc = raw_action * self.Bmax
-
-        # OTHER CARS ---
+        # Current absolute state
         ego_pos, ego_vel, front_pos, front_vel, back_pos, back_vel, _, _, _, _ = self.state
+
+        # OTHER CARS --- choose actions and update absolute values
         front_action = self.update_other_action("front")
         back_action = self.update_other_action("back")
         self.update_front_state(ego_pos, ego_vel, front_pos, front_vel, front_action)
         self.update_back_state(ego_pos, ego_vel, back_pos, back_vel, back_action)
 
+        #read updated absolute values
         ego_pos, ego_vel = self.state[0], self.state[1]
         front_pos_new, front_vel_new = self.state[2], self.state[3]
         back_pos_new, back_vel_new = self.state[4], self.state[5]
-        rel_front_dist_new, rel_front_vel_new = self.state[6], self.state[7]
-        rel_back_dist_new, rel_back_vel_new = self.state[8], self.state[9]
-        # -------------
 
-        # EGO CAR -----
+        # EGO CAR ----- apply action and move ego
         if isinstance(action, (list, tuple, np.ndarray)):  # accept scalar or array-like actions
             try:
                 action = int(np.asarray(action).reshape(-1)[0])  # take first elem if vectorised
@@ -271,6 +261,13 @@ class ACCEnv(gym.Env):
         t = self.TIME_STEP
         ego_vel_new = np.clip(ego_vel + acc * t, 0.0, self.Vmax)
         ego_pos_new = ego_pos + ego_vel * t + 0.5 * acc * t * t
+
+        #COMPUTE RELATIVE VALUE USING *UPDATED* EGO + other cars
+
+        rel_front_dist_new = ego_pos_new - front_pos_new
+        rel_front_vel_new = ego_vel_new - front_vel_new
+        rel_back_dist_new = back_pos_new - ego_pos_new
+        rel_back_vel_new = back_vel_new - ego_vel_new
 
         self.state = (
             np.float32(ego_pos_new), np.float32(ego_vel_new),
